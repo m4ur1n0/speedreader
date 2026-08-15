@@ -255,14 +255,14 @@ describe("getTokenDuration", () => {
     expect(d2).toBeGreaterThan(d1)
   })
 
-  it("difficulty multiplier scales the base duration proportionally", () => {
+  it("difficulty multiplier < 1 makes duration longer (reader slows down)", () => {
     const baseDuration = 200
     const token = makeToken({})
     const d1 = getTokenDuration(token, baseDuration, 1.0)
     const d2 = getTokenDuration(token, baseDuration, 0.8)
-    expect(d2).toBeLessThan(d1)
-    // The lexical component should scale but boundary pauses are also affected.
-    expect(d2 / d1).toBeCloseTo(0.8, 1)
+    // 0.8 speed → 1/0.8 = 1.25× longer duration.
+    expect(d2).toBeGreaterThan(d1)
+    expect(d2 / d1).toBeCloseTo(1.25, 1)
   })
 })
 

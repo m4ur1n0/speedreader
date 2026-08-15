@@ -20,18 +20,17 @@ const LERP_WINDOW = 20
 const BATCH_SIZE = 8
 
 /**
- * Returns the smoothed slowdown multiplier for a given token.
- *
- * Within the bulk of a chunk: the chunk's own multiplier.
- * Within LERP_WINDOW tokens before a chunk boundary: linearly interpolates
- * toward the next chunk's multiplier.
+ * The async loop starts fetching the next batch when the reader is within
+ * this many chunks of the batch's first chunk. At ~175 words/chunk and
+ * 300 WPM a chunk takes ~35 s, so 4 chunks = ~140 s of lead time.
  */
+const LOOKAHEAD_CHUNKS = 4
+
 export function getSmoothedMultiplier(tokenId: number, pacings: ChunkPacing[]): number {
   if (pacings.length === 0) return 1.0
 
   const idx = pacings.findIndex((p) => tokenId >= p.startTokenId && tokenId < p.endTokenId)
   if (idx === -1) {
-    // Past the last chunk — use last chunk's multiplier.
     return pacings[pacings.length - 1].slowdownMultiplier
   }
 
@@ -83,21 +82,26 @@ async function fetchBatch(
     return await attempt()
   } catch (err) {
     if ((err as Error).name === "AbortError") throw err
-    // One retry.
     console.warn("[analysis] batch failed, retrying:", err)
     return await attempt()
   }
 }
 
 /**
- * Hook: triggers Gemini analysis for a model and returns pacing data.
+ * Hook: triggers Gemini analysis pipelined with reading progress.
  *
- * - Analysis fires once per model instance (when the hook mounts or model changes).
- * - Chunks are processed in batches of BATCH_SIZE; pacings update incrementally.
- * - The reader is usable immediately; unanalyzed chunks default to 1.0 multiplier.
- * - A failed batch defaults those chunks to 1.0 without blocking later batches.
+ * Accepts currentTokenId so batches are gated on reader position:
+ *   - First batch fires immediately (needed before reading starts).
+ *   - Each subsequent batch starts once the reader is within LOOKAHEAD_CHUNKS
+ *     of the next unanalyzed region, giving Gemini time to respond before
+ *     the reader arrives at that content.
+ *   - A failed batch (after one retry) defaults those chunks to 1.0 and
+ *     the pipeline continues.
  */
-export function useAnalysis(model: ReaderModel | null): {
+export function useAnalysis(
+  model: ReaderModel | null,
+  currentTokenId: number,
+): {
   pacings: ChunkPacing[]
   chunks: AnalysisChunk[]
   results: ChunkDifficultyResult[]
@@ -109,6 +113,17 @@ export function useAnalysis(model: ReaderModel | null): {
   const [results, setResults] = useState<ChunkDifficultyResult[]>([])
   const [status, setStatus] = useState<AnalysisStatus>("idle")
   const abortRef = useRef<AbortController | null>(null)
+
+  // Shared between the async run loop and the position-tracking effect.
+  // The loop registers a callback here when waiting for the reader to advance;
+  // the effect fires it on every token change.
+  const currentTokenIdRef = useRef(currentTokenId)
+  const onPositionAdvanceRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    currentTokenIdRef.current = currentTokenId
+    onPositionAdvanceRef.current?.()
+  }, [currentTokenId])
 
   useEffect(() => {
     if (!model) {
@@ -123,6 +138,7 @@ export function useAnalysis(model: ReaderModel | null): {
     const controller = new AbortController()
     abortRef.current = controller
 
+    onPositionAdvanceRef.current = null
     setStatus("pending")
     setPacings([])
     setResults([])
@@ -131,14 +147,46 @@ export function useAnalysis(model: ReaderModel | null): {
     setChunks(built)
 
     async function run() {
-      // Accumulated results across all batches, keyed by chunk ID.
       const allResultsById = new Map<number, ChunkDifficultyResult>()
       let anyBatchFailed = false
 
+      function readerChunkIdx(): number {
+        const tid = currentTokenIdRef.current
+        const i = built.findIndex((c) => tid >= c.startTokenId && tid < c.endTokenId)
+        return i === -1 ? built.length - 1 : i
+      }
+
+      /**
+       * Resolves once the reader is within LOOKAHEAD_CHUNKS of batchChunkIdx.
+       * Registers a callback on onPositionAdvanceRef so the position effect
+       * wakes it up on each token advance — no polling.
+       */
+      function waitUntilNeeded(batchChunkIdx: number): Promise<void> {
+        return new Promise((resolve) => {
+          const check = () => {
+            if (controller.signal.aborted) {
+              resolve()
+              return
+            }
+            if (readerChunkIdx() + LOOKAHEAD_CHUNKS >= batchChunkIdx) {
+              onPositionAdvanceRef.current = null
+              resolve()
+            } else {
+              // Re-register for the next token advance.
+              onPositionAdvanceRef.current = check
+            }
+          }
+          check()
+        })
+      }
+
       for (let i = 0; i < built.length; i += BATCH_SIZE) {
         if (controller.signal.aborted) return
-        const batch = built.slice(i, i + BATCH_SIZE)
 
+        await waitUntilNeeded(i)
+        if (controller.signal.aborted) return
+
+        const batch = built.slice(i, i + BATCH_SIZE)
         try {
           const batchResults = await fetchBatch(batch, controller.signal)
           for (const r of batchResults) {
@@ -146,12 +194,10 @@ export function useAnalysis(model: ReaderModel | null): {
           }
         } catch (err) {
           if ((err as Error).name === "AbortError") return
-          console.error("[analysis] batch error (chunks will default to 1.0):", err)
+          console.error("[analysis] batch error (chunks default to 1.0):", err)
           anyBatchFailed = true
-          // Continue — successful previous batches remain useful.
         }
 
-        // Apply partial results after each batch so pacing updates progressively.
         const snapshot = new Map(allResultsById)
         setPacings(chunksToPacings(built, snapshot))
         setResults(Array.from(snapshot.values()))
@@ -164,6 +210,7 @@ export function useAnalysis(model: ReaderModel | null): {
 
     return () => {
       controller.abort()
+      onPositionAdvanceRef.current = null
     }
   }, [model])
 

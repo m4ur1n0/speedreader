@@ -74,7 +74,10 @@ export function ReaderControls({
         {/* Left: WPM + position info */}
         <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
           <span className="font-medium text-zinc-700 dark:text-zinc-300">
-            {currentBaseWpm} <span className="font-normal">WPM</span>
+            {multiplier !== null && multiplier < 1
+              ? Math.round(currentBaseWpm * multiplier)
+              : currentBaseWpm}{" "}
+            <span className="font-normal">WPM</span>
           </span>
           <span className="text-zinc-300 dark:text-zinc-600" aria-hidden="true">·</span>
           <span>

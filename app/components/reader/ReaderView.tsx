@@ -34,21 +34,27 @@ interface Props {
  *   Escape  → exit
  */
 export function ReaderView({ model, onExit }: Props) {
-  const { pacings, status: analysisStatus, currentChunkResult } = useAnalysis(model)
-
-  // pacingsRef lets the getMultiplier callback always read the latest pacing data
-  // without re-registering with the player on every pacing update. Updated in an
-  // effect (not during render) to satisfy the no-ref-write-during-render rule.
-  const pacingsRef = useRef(pacings)
-  useEffect(() => {
-    pacingsRef.current = pacings
-  }, [pacings])
+  // pacingsRef lets getMultiplier always read fresh pacing data without being
+  // a reactive dependency of the player. Initialised empty → 1.0 default.
+  const pacingsRef = useRef<ReturnType<typeof useAnalysis>["pacings"]>([])
 
   function getMultiplier(tokenId: number) {
     return getSmoothedMultiplier(tokenId, pacingsRef.current)
   }
 
+  // Player runs first so we can pass currentTokenId to useAnalysis below.
   const [state, controls] = useReaderPlayer(model, undefined, getMultiplier)
+
+  // Analysis is pipelined with reading: subsequent batches only fire once the
+  // reader is within LOOKAHEAD_CHUNKS of the next unanalyzed region.
+  const { pacings, status: analysisStatus, currentChunkResult } = useAnalysis(
+    model,
+    state.currentTokenId,
+  )
+
+  useEffect(() => {
+    pacingsRef.current = pacings
+  }, [pacings])
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Focus the container on mount so keyboard events are captured immediately.

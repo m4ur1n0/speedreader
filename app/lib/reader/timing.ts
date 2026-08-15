@@ -52,7 +52,10 @@ export function getTokenDuration(
   baseDurationMs: number,
   difficultyMultiplier: number
 ): number {
-  const base = baseDurationMs * token.timingWeight * difficultyMultiplier
+  // difficultyMultiplier is a speed ratio: 1.0 = normal, 0.80 = 80% speed.
+  // Dividing baseDurationMs by it converts speed ratio to duration ratio
+  // (0.80 speed → 1.25× longer per token).
+  const base = baseDurationMs * token.timingWeight / difficultyMultiplier
 
   // Pick the single largest boundary pause — don't stack them.
   let pause = 0

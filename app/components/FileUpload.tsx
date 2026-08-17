@@ -31,7 +31,7 @@ async function isPdfTextBased(file: File): Promise<boolean> {
 }
 
 interface FileUploadProps {
-  onDocumentParsed?: (doc: ParsedDocument | null) => void;
+  onDocumentParsed?: (doc: ParsedDocument | null, file: File | null) => void;
 }
 
 type ParseState =
@@ -73,7 +73,7 @@ export default function FileUpload({ onDocumentParsed }: FileUploadProps) {
       const { parseFile } = await import("@/app/lib/document");
       const doc = await parseFile(incoming);
       setParseState({ status: "done", doc });
-      onDocumentParsed?.(doc);
+      onDocumentParsed?.(doc, incoming);
     } catch (err) {
       if (err instanceof ScannedPdfError) {
         setError(err.message);
@@ -82,7 +82,7 @@ export default function FileUpload({ onDocumentParsed }: FileUploadProps) {
       }
       setFile(null);
       setParseState({ status: "idle" });
-      onDocumentParsed?.(null);
+      onDocumentParsed?.(null, null);
     }
   }
 
@@ -112,7 +112,7 @@ export default function FileUpload({ onDocumentParsed }: FileUploadProps) {
     setFile(null);
     setError(null);
     setParseState({ status: "idle" });
-    onDocumentParsed?.(null);
+    onDocumentParsed?.(null, null);
   }
 
   const busy = parseState.status === "validating" || parseState.status === "parsing";

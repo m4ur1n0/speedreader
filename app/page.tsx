@@ -3,32 +3,72 @@
 import { useState, useMemo } from "react";
 import FileUpload from "./components/FileUpload";
 import { ReaderView } from "./components/reader/ReaderView";
+import type { ReaderSession } from "./components/reader/ReaderView";
+import { HighlightDigest } from "./components/HighlightDigest";
 import type { ParsedDocument } from "./lib/document";
 import { getSourceSpansForRange } from "./lib/document";
 import { buildReaderModel } from "./lib/reader/tokenizer";
+import type { ReaderHighlight } from "./lib/highlight/types";
+import {
+  estimateNormalReadingSeconds,
+  estimateSpeedreaderSeconds,
+  formatDuration,
+  NORMAL_READING_WPM,
+} from "./lib/reader/statsHelpers";
+import { RAMP_MAX_WPM } from "./lib/reader/types";
 
 export default function Home() {
   const [doc, setDoc] = useState<ParsedDocument | null>(null);
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [readerActive, setReaderActive] = useState(false);
+  const [session, setSession] = useState<ReaderSession | null>(null);
 
-  // Build the reader model once when the document changes.
-  // This is memoised here (not inside ReaderView) so it survives
-  // ReaderView unmount/remount without rebuilding.
   const readerModel = useMemo(
     () => (doc ? buildReaderModel(doc) : null),
     [doc]
   );
 
-  function handleDocumentParsed(incoming: ParsedDocument | null) {
+  function handleDocumentParsed(incoming: ParsedDocument | null, file: File | null) {
     setDoc(incoming);
+    setSourceFile(file);
+    setSession(null);
     setReaderActive(false);
+  }
+
+  function handleReaderExit(s: ReaderSession) {
+    setSession(s);
+    setReaderActive(false);
+  }
+
+  async function handleDownloadPdf(highlights: ReaderHighlight[]) {
+    if (!doc || !sourceFile || highlights.length === 0) return;
+
+    if (doc.metadata.fileType === "pdf") {
+      const { downloadHighlightedPdf } = await import("./lib/highlight/pdfExport");
+      const bytes = await sourceFile.arrayBuffer();
+      await downloadHighlightedPdf(bytes, highlights, doc, sourceFile.name);
+    } else {
+      const { downloadTextAsPdf } = await import("./lib/highlight/textPdfExport");
+      await downloadTextAsPdf(doc, highlights, sourceFile.name);
+    }
+  }
+
+  const hasProgress = !!(session && session.currentTokenId > 0);
+  const hasHighlights = !!(session && session.highlights.length > 0);
+
+  function handleResumeSeek(tokenId: number) {
+    if (!session) return;
+    setSession({ ...session, currentTokenId: tokenId });
+    setReaderActive(true);
   }
 
   if (readerActive && readerModel) {
     return (
       <ReaderView
         model={readerModel}
-        onExit={() => setReaderActive(false)}
+        onExit={handleReaderExit}
+        initialSession={session}
+        onDownloadPdf={doc ? handleDownloadPdf : null}
       />
     );
   }
@@ -41,17 +81,113 @@ export default function Home() {
 
       <FileUpload onDocumentParsed={handleDocumentParsed} />
 
+      {/* ── Pre-reading stats + action buttons ──────────────────────────────── */}
       {doc && readerModel && (
-        <button
-          onClick={() => setReaderActive(true)}
-          className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-500"
-        >
-          Start Reading — {readerModel.tokens.length.toLocaleString()} words
-        </button>
+        <div className="flex flex-col items-center gap-4 w-full max-w-sm">
+          {/* Reading time estimates */}
+          <ReadingEstimates tokenCount={readerModel.tokens.length} />
+
+          {/* Start / Resume / Restart buttons */}
+          <div className="flex items-center gap-3">
+            {hasProgress ? (
+              <>
+                <button
+                  onClick={() => setReaderActive(true)}
+                  className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-500"
+                >
+                  Resume — {session!.currentTokenId.toLocaleString()} /{" "}
+                  {readerModel.tokens.length.toLocaleString()} words
+                </button>
+                <button
+                  onClick={() => {
+                    setSession(null);
+                    setReaderActive(true);
+                  }}
+                  className="px-4 py-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-medium transition-colors"
+                >
+                  Restart
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setReaderActive(true)}
+                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-500"
+              >
+                Start Reading — {readerModel.tokens.length.toLocaleString()} words
+              </button>
+            )}
+          </div>
+
+          {/* Download highlighted export (any file type) */}
+          {hasHighlights && (
+            <button
+              onClick={() => handleDownloadPdf(session!.highlights)}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors"
+            >
+              Download highlighted PDF ({session!.highlights.length}{" "}
+              {session!.highlights.length === 1 ? "highlight" : "highlights"})
+            </button>
+          )}
+        </div>
       )}
 
+      {/* ── Highlight digest ─────────────────────────────────────────────────── */}
+      {doc && hasHighlights && (
+        <HighlightDigest
+          highlights={session!.highlights}
+          canonicalText={doc.text}
+          onSeekTo={handleResumeSeek}
+        />
+      )}
+
+      {/* ── Debug panel ──────────────────────────────────────────────────────── */}
       {doc && <DebugPanel doc={doc} />}
     </main>
+  );
+}
+
+// ─── Pre-reading estimates ───────────────────────────────────────────────────
+
+function ReadingEstimates({ tokenCount }: { tokenCount: number }) {
+  const normalSec = estimateNormalReadingSeconds(tokenCount);
+  const speedSec = estimateSpeedreaderSeconds(tokenCount, RAMP_MAX_WPM);
+  const savedSec = Math.max(0, normalSec - speedSec);
+
+  return (
+    <div className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-5 py-4 text-sm">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 tabular-nums">
+        <span className="text-zinc-500 dark:text-zinc-400">Words</span>
+        <span className="font-medium text-zinc-800 dark:text-zinc-200">
+          {tokenCount.toLocaleString()}
+        </span>
+
+        <span className="text-zinc-500 dark:text-zinc-400">
+          Normal ({NORMAL_READING_WPM} WPM)
+        </span>
+        <span className="font-medium text-zinc-800 dark:text-zinc-200">
+          {formatDuration(normalSec)}
+        </span>
+
+        <span className="text-zinc-500 dark:text-zinc-400">
+          Speedreader est.
+        </span>
+        <span className="font-medium text-blue-600 dark:text-blue-400">
+          {formatDuration(speedSec)}
+        </span>
+
+        {savedSec > 60 && (
+          <>
+            <span className="text-zinc-500 dark:text-zinc-400">Est. time saved</span>
+            <span className="font-medium text-green-600 dark:text-green-400">
+              {formatDuration(savedSec)}
+            </span>
+          </>
+        )}
+      </div>
+      <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
+        Estimates only. Speedreader time uses the {RAMP_MAX_WPM}-WPM ramp.
+      </p>
+    </div>
   );
 }
 

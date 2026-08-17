@@ -1,53 +1,79 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
 import type { ReaderModel } from "@/app/lib/reader/types"
 import { useReaderPlayer } from "@/app/lib/reader/player"
 import { useAnalysis, getSmoothedMultiplier } from "@/app/lib/analysis/pacing"
+import { useHighlighter } from "@/app/lib/highlight/useHighlighter"
+import type { ReaderHighlight } from "@/app/lib/highlight/types"
 import { WordDisplay } from "./WordDisplay"
 import { SentenceContext } from "./SentenceContext"
 import { ReaderControls } from "./ReaderControls"
+import type { ReadingMode } from "./ReaderControls"
+
+export interface ReaderSession {
+  currentTokenId: number
+  highlights: ReaderHighlight[]
+}
 
 interface Props {
   model: ReaderModel
-  onExit: () => void
+  onExit: (session: ReaderSession) => void
+  initialSession?: ReaderSession | null
+  onDownloadPdf?: ((highlights: ReaderHighlight[]) => void) | null
 }
 
 /**
  * Full-page reader shell.
  *
- * Layout:
- *   ┌──────────────────────────────────┐
- *   │  [progress + doc info strip]     │  ← fixed top, flex-shrink-0
- *   │                                  │
- *   │        focal word (ORP)          │  ← flex-1, vertically centered
- *   │      sentence context            │
- *   │                                  │
- *   │  [controls bar]                  │  ← fixed bottom, flex-shrink-0
- *   └──────────────────────────────────┘
- *
- * Keyboard handling uses a named dispatch table so individual keys can be
- * reassigned without touching sibling key handling:
- *
- *   Space   → currently togglePlayPause
- *             (future: startHighlight / stopHighlight)
- *   Escape  → exit
+ * Keyboard bindings:
+ *   Space   → togglePlayPause
+ *   H       → hold to highlight (keydown begins, keyup finalizes)
+ *   Escape  → flush in-progress highlight, exit
+ *   B       → toggle Baseline / Adaptive mode
  */
-export function ReaderView({ model, onExit }: Props) {
-  // pacingsRef lets getMultiplier always read fresh pacing data without being
-  // a reactive dependency of the player. Initialised empty → 1.0 default.
+export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Props) {
+  const [mode, setMode] = useState<ReadingMode>("baseline")
+
   const pacingsRef = useRef<ReturnType<typeof useAnalysis>["pacings"]>([])
 
-  function getMultiplier(tokenId: number) {
+  function getMultiplier(tokenId: number): number {
+    if (mode === "baseline") return 1.0
     return getSmoothedMultiplier(tokenId, pacingsRef.current)
   }
 
-  // Player runs first so we can pass currentTokenId to useAnalysis below.
   const [state, controls] = useReaderPlayer(model, undefined, getMultiplier)
 
-  // Analysis is pipelined with reading: subsequent batches only fire once the
-  // reader is within LOOKAHEAD_CHUNKS of the next unanalyzed region.
-  const { pacings, status: analysisStatus, currentChunkResult } = useAnalysis(
+  const playerStateRef = useRef({ currentTokenId: 0, currentBaseWpm: 300 })
+  playerStateRef.current = {
+    currentTokenId: state.currentTokenId,
+    currentBaseWpm: state.currentBaseWpm,
+  }
+
+  const highlighter = useHighlighter(model, playerStateRef)
+  const highlighterRef = useRef(highlighter)
+  highlighterRef.current = highlighter
+
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
+
+  // mode ref for keyboard handler
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+
+  // Restore session on mount.
+  useEffect(() => {
+    if (!initialSession) return
+    if (initialSession.currentTokenId > 0) {
+      controls.seekToToken(initialSession.currentTokenId)
+    }
+    if (initialSession.highlights.length > 0) {
+      highlighter.setHighlights(initialSession.highlights)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const { pacings, chunks, results, status: analysisStatus, currentChunkResult } = useAnalysis(
     model,
     state.currentTokenId,
   )
@@ -55,17 +81,39 @@ export function ReaderView({ model, onExit }: Props) {
   useEffect(() => {
     pacingsRef.current = pacings
   }, [pacings])
+
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Focus the container on mount so keyboard events are captured immediately.
   useEffect(() => {
     containerRef.current?.focus()
   }, [])
 
+  const buildExitSession = useCallback((): ReaderSession => {
+    const h = highlighterRef.current
+    const { currentTokenId } = playerStateRef.current
+    let finalHighlights = [...h.highlights]
+
+    if (h.activeHighlight && model) {
+      const endTokenId = Math.min(currentTokenId, model.tokens.length - 1)
+      const endToken = model.tokens[endTokenId]
+      if (endToken && endTokenId >= h.activeHighlight.startTokenId) {
+        finalHighlights = [
+          ...finalHighlights,
+          {
+            id: `h_exit_${Date.now()}`,
+            startTokenId: h.activeHighlight.startTokenId,
+            endTokenId,
+            canonicalStart: h.activeHighlight.canonicalStart,
+            canonicalEnd: endToken.canonicalEnd,
+          } satisfies ReaderHighlight,
+        ]
+      }
+    }
+
+    return { currentTokenId, highlights: finalHighlights }
+  }, [model])
+
   // ── Keyboard dispatch ────────────────────────────────────────────────────
-  // Space is mapped to togglePlayPause here as a first-class named action.
-  // A future hold-to-highlight pass will replace this mapping without
-  // altering the controls interface or other key bindings.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -77,20 +125,50 @@ export function ReaderView({ model, onExit }: Props) {
           e.preventDefault()
           controls.togglePlayPause()
           break
+        case "h":
+        case "H":
+          e.preventDefault()
+          highlighterRef.current.beginHighlight()
+          break
+        case "b":
+        case "B":
+          e.preventDefault()
+          setMode((m) => m === "baseline" ? "adaptive" : "baseline")
+          break
         case "Escape":
           e.preventDefault()
-          onExit()
+          onExitRef.current(buildExitSession())
           break
       }
     }
 
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.key === "h" || e.key === "H") {
+        e.preventDefault()
+        highlighterRef.current.endHighlight()
+      }
+    }
+
     el.addEventListener("keydown", handleKeyDown)
-    return () => el.removeEventListener("keydown", handleKeyDown)
-  }, [controls, onExit])
+    el.addEventListener("keyup", handleKeyUp)
+    return () => {
+      el.removeEventListener("keydown", handleKeyDown)
+      el.removeEventListener("keyup", handleKeyUp)
+    }
+  }, [controls, buildExitSession])
 
   const token = model.tokens[state.currentTokenId] ?? null
   const isPaused = state.status !== "playing"
   const currentDifficulty = currentChunkResult(state.currentTokenId)
+
+  function handleExit() {
+    onExitRef.current(buildExitSession())
+  }
+
+  const canDownloadPdf = onDownloadPdf != null && highlighter.highlights.length > 0
+  function handleDownloadPdf() {
+    onDownloadPdf?.(highlighter.highlights)
+  }
 
   return (
     <div
@@ -100,27 +178,31 @@ export function ReaderView({ model, onExit }: Props) {
       role="application"
       aria-label="Speedreader"
     >
-      {/* ── Main reading area ─────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col items-center justify-center gap-8 px-4 py-10">
-        {/* Stable focal-word display */}
         <WordDisplay token={token} paused={isPaused} />
 
-        {/* Sentence context strip */}
         <SentenceContext
           model={model}
           currentTokenId={state.currentTokenId}
           paused={isPaused}
+          highlights={highlighter.highlights}
+          activeHighlight={highlighter.activeHighlight}
         />
       </main>
 
-      {/* ── Controls bar ──────────────────────────────────────────────────── */}
       <ReaderControls
         state={state}
         totalTokens={model.tokens.length}
         controls={controls}
-        onExit={onExit}
+        onExit={handleExit}
         analysisStatus={analysisStatus}
         currentDifficulty={currentDifficulty}
+        highlightCount={highlighter.highlights.length}
+        onDownloadPdf={canDownloadPdf ? handleDownloadPdf : null}
+        mode={mode}
+        onModeChange={setMode}
+        chunks={chunks}
+        pacings={pacings}
       />
     </div>
   )

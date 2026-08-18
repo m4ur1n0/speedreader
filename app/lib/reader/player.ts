@@ -33,6 +33,10 @@ export interface ReaderControls {
   /** Warp the ramp state so the next token uses this WPM. Does not move
    *  the reading position. */
   setCurrentWpm(wpm: number): void
+  /** Atomically raise the ramp ceiling to newMax and bump current WPM by
+   *  increment. Used by manual "Faster" control so both changes are in one
+   *  state update and stay consistent. */
+  manualBoostSpeed(increment: number, newMax: number): void
 }
 
 /**
@@ -225,6 +229,18 @@ export function useReaderPlayer(
     }))
   }, [])
 
+  const manualBoostSpeed = useCallback((increment: number, newMax: number) => {
+    setState((prev) => {
+      const newCurrentWpm = Math.min(prev.currentBaseWpm + increment, newMax)
+      return {
+        ...prev,
+        targetMaxWpm: newMax,
+        activeReadingMs: wpmToActiveMs(newCurrentWpm, newMax, RAMP_START_WPM, RAMP_DURATION_MS),
+        currentBaseWpm: Math.round(newCurrentWpm),
+      }
+    })
+  }, [])
+
   const controls: ReaderControls = {
     play,
     pause,
@@ -234,6 +250,7 @@ export function useReaderPlayer(
     seekToParagraphStart,
     setTargetMaxWpm,
     setCurrentWpm,
+    manualBoostSpeed,
   }
 
   return [state, controls]

@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai"
 import type { AnalysisChunk, ChunkDifficultyResult, DifficultyLevel } from "@/app/lib/analysis/types"
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-flash-latest"
+const GEMINI_TIMEOUT_MS = 20_000
 
 const VALID_LEVELS = new Set<DifficultyLevel>(["normal", "mild", "moderate", "high", "very_high"])
 
@@ -80,16 +81,27 @@ export async function POST(req: NextRequest) {
   try {
     const ai = new GoogleGenAI({ apiKey })
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-        temperature: 0,
-      },
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error(`Gemini request timed out after ${GEMINI_TIMEOUT_MS}ms`)),
+        GEMINI_TIMEOUT_MS
+      )
     })
+
+    const response = await Promise.race([
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: "application/json",
+          responseSchema: RESPONSE_SCHEMA,
+          temperature: 0,
+        },
+      }),
+      timeoutPromise,
+    ]).finally(() => clearTimeout(timeoutId))
 
     const raw = response.text
     if (!raw) {

@@ -5,6 +5,33 @@ import type { ReaderModel } from "@/app/lib/reader/types"
 import type { AnalysisChunk, ChunkDifficultyResult, ChunkPacing, AnalysisStatus, DifficultyLevel } from "./types"
 import { buildAnalysisChunks } from "./chunker"
 
+// ── Retry config ──────────────────────────────────────────────────────────────
+// Delays (ms) before the 2nd and 3rd attempt respectively; 3rd failure = fallback.
+const RETRY_DELAYS_MS = [500, 1500] as const
+
+/** Thrown for HTTP errors that should NOT be retried (4xx except 429). */
+class PermanentAnalysisError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "PermanentAnalysisError"
+  }
+}
+
+function addJitter(base: number): number {
+  return Math.max(0, base + Math.floor(Math.random() * 200 - 100))
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { const e = new Error("AbortError"); e.name = "AbortError"; reject(e); return }
+    const id = setTimeout(resolve, ms)
+    signal.addEventListener("abort", () => {
+      clearTimeout(id)
+      const e = new Error("AbortError"); e.name = "AbortError"; reject(e)
+    }, { once: true })
+  })
+}
+
 export const LEVEL_TO_MULTIPLIER: Record<DifficultyLevel, number> = {
   normal: 1.00,
   mild: 0.96,
@@ -63,28 +90,44 @@ async function fetchBatch(
   batch: AnalysisChunk[],
   signal: AbortSignal
 ): Promise<ChunkDifficultyResult[]> {
-  const attempt = async () => {
-    const res = await fetch("/api/analyze-difficulty", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chunks: batch }),
-      signal,
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }))
-      throw new Error(`[analysis] route error: ${JSON.stringify(err)}`)
+  const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1
+  let lastErr: unknown = null
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (signal.aborted) { const e = new Error("AbortError"); e.name = "AbortError"; throw e }
+
+    if (attempt > 0) {
+      await sleep(addJitter(RETRY_DELAYS_MS[attempt - 1]), signal)
     }
-    const { results }: { results: ChunkDifficultyResult[] } = await res.json()
-    return results
+
+    try {
+      const res = await fetch("/api/analyze-difficulty", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chunks: batch }),
+        signal,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText }))
+        const msg = `[analysis] HTTP ${res.status}: ${JSON.stringify(body)}`
+        // Only retry genuinely transient failures. 4xx errors (except 429) are
+        // permanent: bad request, auth problem, missing API key, etc. Retrying
+        // them wastes time and masks real configuration bugs.
+        const isTransient = res.status === 429 || res.status >= 500
+        if (!isTransient) throw new PermanentAnalysisError(msg)
+        throw new Error(msg)
+      }
+      const { results }: { results: ChunkDifficultyResult[] } = await res.json()
+      return results
+    } catch (err) {
+      if ((err as Error).name === "AbortError") throw err
+      if (err instanceof PermanentAnalysisError) throw err  // no retry
+      lastErr = err
+      console.warn(`[analysis] attempt ${attempt + 1}/${MAX_ATTEMPTS} failed:`, err)
+    }
   }
 
-  try {
-    return await attempt()
-  } catch (err) {
-    if ((err as Error).name === "AbortError") throw err
-    console.warn("[analysis] batch failed, retrying:", err)
-    return await attempt()
-  }
+  throw lastErr ?? new Error("[analysis] all retries exhausted")
 }
 
 /**
@@ -106,12 +149,15 @@ export function useAnalysis(
   chunks: AnalysisChunk[]
   results: ChunkDifficultyResult[]
   status: AnalysisStatus
+  /** True when at least one batch failed permanently (after retries). */
+  hadErrors: boolean
   currentChunkResult: (tokenId: number) => ChunkDifficultyResult | null
 } {
   const [pacings, setPacings] = useState<ChunkPacing[]>([])
   const [chunks, setChunks] = useState<AnalysisChunk[]>([])
   const [results, setResults] = useState<ChunkDifficultyResult[]>([])
   const [status, setStatus] = useState<AnalysisStatus>("idle")
+  const [hadErrors, setHadErrors] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   // Shared between the async run loop and the position-tracking effect.
@@ -140,6 +186,7 @@ export function useAnalysis(
 
     onPositionAdvanceRef.current = null
     setStatus("pending")
+    setHadErrors(false)
     setPacings([])
     setResults([])
 
@@ -194,16 +241,23 @@ export function useAnalysis(
           }
         } catch (err) {
           if ((err as Error).name === "AbortError") return
-          console.error("[analysis] batch error (chunks default to 1.0):", err)
+          console.error("[analysis] batch failed after retries (chunks default to 1.0):", err)
           anyBatchFailed = true
         }
+
+        // Guard: abort may have fired while fetchBatch was in-flight but after
+        // the response was already received (request completed before abort).
+        // Without this check, stale document-A results could overwrite document-B state.
+        if (controller.signal.aborted) return
 
         const snapshot = new Map(allResultsById)
         setPacings(chunksToPacings(built, snapshot))
         setResults(Array.from(snapshot.values()))
+        if (anyBatchFailed) setHadErrors(true)
       }
 
       setStatus(anyBatchFailed && allResultsById.size === 0 ? "error" : "done")
+      setHadErrors(anyBatchFailed)
     }
 
     run()
@@ -223,5 +277,5 @@ export function useAnalysis(
     [chunks, results]
   )
 
-  return { pacings, chunks, results, status, currentChunkResult }
+  return { pacings, chunks, results, status, hadErrors, currentChunkResult }
 }

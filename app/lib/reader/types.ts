@@ -50,5 +50,5 @@ export interface PlayerState {
 }
 
 export const RAMP_START_WPM = 240
-export const RAMP_MAX_WPM = 400
+export const RAMP_MAX_WPM = 350
 export const RAMP_DURATION_MS = 210_000 // 3.5 minutes of active reading

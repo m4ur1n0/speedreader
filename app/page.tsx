@@ -5,6 +5,8 @@ import FileUpload from "./components/FileUpload";
 import { ReaderView } from "./components/reader/ReaderView";
 import type { ReaderSession } from "./components/reader/ReaderView";
 import { HighlightDigest } from "./components/HighlightDigest";
+import { HighlightAnalysisView } from "./components/HighlightAnalysisView";
+import { useHighlightAnalysis } from "./lib/highlightAnalysis/useHighlightAnalysis";
 import type { ParsedDocument } from "./lib/document";
 import { getSourceSpansForRange } from "./lib/document";
 import { buildReaderModel } from "./lib/reader/tokenizer";
@@ -21,11 +23,22 @@ export default function Home() {
   const [doc, setDoc] = useState<ParsedDocument | null>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [readerActive, setReaderActive] = useState(false);
+  const [analysisActive, setAnalysisActive] = useState(false);
   const [session, setSession] = useState<ReaderSession | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const readerModel = useMemo(
     () => (doc ? buildReaderModel(doc) : null),
     [doc]
+  );
+
+  // Stable empty arrays so useHighlightAnalysis hook doesn't throw when doc/session are null
+  const currentHighlights: ReaderHighlight[] = session?.highlights ?? [];
+
+  // Analysis state lives at page level so it survives navigation between views
+  const analysisControls = useHighlightAnalysis(
+    currentHighlights,
+    doc ?? { text: "", spans: [], metadata: { fileName: "", fileType: "" } }
   );
 
   function handleDocumentParsed(incoming: ParsedDocument | null, file: File | null) {
@@ -33,6 +46,8 @@ export default function Home() {
     setSourceFile(file);
     setSession(null);
     setReaderActive(false);
+    setAnalysisActive(false);
+    setExportError(null);
   }
 
   function handleReaderExit(s: ReaderSession) {
@@ -40,9 +55,9 @@ export default function Home() {
     setReaderActive(false);
   }
 
+  // Core export — does not catch; callers are responsible for their own error UI.
   async function handleDownloadPdf(highlights: ReaderHighlight[]) {
     if (!doc || !sourceFile || highlights.length === 0) return;
-
     if (doc.metadata.fileType === "pdf") {
       const { downloadHighlightedPdf } = await import("./lib/highlight/pdfExport");
       const bytes = await sourceFile.arrayBuffer();
@@ -51,6 +66,15 @@ export default function Home() {
       const { downloadTextAsPdf } = await import("./lib/highlight/textPdfExport");
       await downloadTextAsPdf(doc, highlights, sourceFile.name);
     }
+  }
+
+  // Home-page button wrapper: catches and stores error for display on this page.
+  function handleHomePageDownload() {
+    if (!session) return;
+    setExportError(null);
+    handleDownloadPdf(session.highlights).catch((err) => {
+      setExportError(err instanceof Error ? err.message : "Export failed.");
+    });
   }
 
   const hasProgress = !!(session && session.currentTokenId > 0);
@@ -69,6 +93,17 @@ export default function Home() {
         onExit={handleReaderExit}
         initialSession={session}
         onDownloadPdf={doc ? handleDownloadPdf : null}
+      />
+    );
+  }
+
+  if (analysisActive && doc && hasHighlights) {
+    return (
+      <HighlightAnalysisView
+        doc={doc}
+        highlights={session!.highlights}
+        controls={analysisControls}
+        onClose={() => setAnalysisActive(false)}
       />
     );
   }
@@ -118,15 +153,32 @@ export default function Home() {
             )}
           </div>
 
-          {/* Download highlighted export (any file type) */}
+          {/* Post-reading actions */}
           {hasHighlights && (
-            <button
-              onClick={() => handleDownloadPdf(session!.highlights)}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors"
-            >
-              Download highlighted PDF ({session!.highlights.length}{" "}
-              {session!.highlights.length === 1 ? "highlight" : "highlights"})
-            </button>
+            <div className="flex flex-col gap-2 w-full">
+              {/* Analyze Highlights */}
+              <button
+                onClick={() => setAnalysisActive(true)}
+                className="w-full px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
+              >
+                Analyze Highlights ({session!.highlights.length}{" "}
+                {session!.highlights.length === 1 ? "highlight" : "highlights"})
+              </button>
+
+              {/* Download highlighted PDF */}
+              <button
+                onClick={handleHomePageDownload}
+                className="w-full px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors"
+              >
+                Download Highlighted PDF
+              </button>
+            </div>
+          )}
+
+          {exportError && (
+            <p className="text-sm text-red-500 max-w-sm text-center" role="alert">
+              {exportError}
+            </p>
           )}
         </div>
       )}

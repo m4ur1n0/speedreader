@@ -2,6 +2,73 @@ import type { ParsedDocument } from "../document/types"
 import type { ReaderHighlight } from "./types"
 import { normalizeHighlightRanges } from "./normalize"
 
+// ── Helvetica/WinAnsi character support check ─────────────────────────────────
+//
+// pdf-lib's standard fonts use Windows-1252 (WinAnsi) encoding.
+// Supported code points:
+//   U+0020–U+007E  printable ASCII
+//   U+00A0–U+00FF  Latin-1 Supplement
+//   A handful of extras from the Windows-1252 table (€, smart quotes, dashes, etc.)
+//
+// Characters outside this set would cause pdf-lib to silently emit blank glyphs
+// or throw an encoding error.  We detect them up front and fail cleanly.
+const WIN_ANSI_EXTRAS = new Set([
+  0x20AC, // €
+  0x201A, // ‚
+  0x0192, // ƒ
+  0x201E, // „
+  0x2026, // …
+  0x2020, // †
+  0x2021, // ‡
+  0x02C6, // ˆ
+  0x2030, // ‰
+  0x0160, // Š
+  0x2039, // ‹
+  0x0152, // Œ
+  0x017D, // Ž
+  0x2018, // '
+  0x2019, // '
+  0x201C, // "
+  0x201D, // "
+  0x2022, // •
+  0x2013, // –
+  0x2014, // —
+  0x02DC, // ˜
+  0x2122, // ™
+  0x0161, // š
+  0x203A, // ›
+  0x0153, // œ
+  0x017E, // ž
+  0x0178, // Ÿ
+])
+
+function isWinAnsi(cp: number): boolean {
+  return (cp >= 0x0020 && cp <= 0x007E) ||
+    (cp >= 0x00A0 && cp <= 0x00FF) ||
+    WIN_ANSI_EXTRAS.has(cp)
+}
+
+/**
+ * Returns the first (up to `limit`) distinct characters in `text` whose code
+ * points are not encodable by Helvetica/WinAnsi.  Control characters (< 0x20)
+ * are excluded because they are handled structurally (newlines, etc.) and never
+ * passed to the font renderer.
+ */
+function collectUnsupportedChars(text: string, limit = 8): string[] {
+  const seen = new Set<number>()
+  const chars: string[] = []
+  for (const ch of text) {
+    if (chars.length >= limit) break
+    const cp = ch.codePointAt(0) ?? 0
+    if (cp < 0x0020) continue  // control characters — handled structurally
+    if (!isWinAnsi(cp) && !seen.has(cp)) {
+      seen.add(cp)
+      chars.push(ch)
+    }
+  }
+  return chars
+}
+
 // ── Layout constants ─────────────────────────────────────────────────────────
 
 const PAGE_WIDTH = 595.28   // A4 points
@@ -56,6 +123,18 @@ export async function downloadTextAsPdf(
   pdfDoc.setTitle(doc.metadata.fileName)
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+
+  // ── Unicode pre-flight ────────────────────────────────────────────────────
+  // Fail early rather than silently emitting blank glyphs for characters that
+  // Helvetica/WinAnsi cannot encode.
+  const badChars = collectUnsupportedChars(doc.text)
+  if (badChars.length > 0) {
+    const shown = badChars.map((c) => `"${c}" (U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")})`).join(", ")
+    throw new Error(
+      `PDF export failed: the document contains characters that the built-in font (Helvetica) cannot encode — ${shown}. ` +
+      `To export a PDF with full Unicode text, use a PDF source file instead of a plain-text file.`
+    )
+  }
 
   // ── Layout pass: convert canonical text → LayoutLines ─────────────────────
 

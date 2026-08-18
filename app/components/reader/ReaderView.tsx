@@ -20,7 +20,7 @@ interface Props {
   model: ReaderModel
   onExit: (session: ReaderSession) => void
   initialSession?: ReaderSession | null
-  onDownloadPdf?: ((highlights: ReaderHighlight[]) => void) | null
+  onDownloadPdf?: ((highlights: ReaderHighlight[]) => Promise<void>) | null
 }
 
 /**
@@ -32,8 +32,16 @@ interface Props {
  *   Escape  → flush in-progress highlight, exit
  *   B       → toggle Baseline / Adaptive mode
  */
+const AUTOMATIC_MAX_WPM = 350
+const MANUAL_MAX_WPM_CAP = 500
+const BOOST_INCREMENT = 25
+
 export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Props) {
   const [mode, setMode] = useState<ReadingMode>("baseline")
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [manualSpeedBoost, setManualSpeedBoost] = useState(0)
+  const manualSpeedBoostRef = useRef(0)
+  manualSpeedBoostRef.current = manualSpeedBoost
 
   const pacingsRef = useRef<ReturnType<typeof useAnalysis>["pacings"]>([])
 
@@ -43,6 +51,8 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
   }
 
   const [state, controls] = useReaderPlayer(model, undefined, getMultiplier)
+  const controlsRef = useRef(controls)
+  controlsRef.current = controls
 
   const playerStateRef = useRef({ currentTokenId: 0, currentBaseWpm: 300 })
   playerStateRef.current = {
@@ -61,6 +71,19 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
   const modeRef = useRef(mode)
   modeRef.current = mode
 
+  function handleSpeedUp() {
+    const currentBoost = manualSpeedBoostRef.current
+    const maxBoost = MANUAL_MAX_WPM_CAP - AUTOMATIC_MAX_WPM
+    if (currentBoost >= maxBoost) return
+    const newBoost = Math.min(currentBoost + BOOST_INCREMENT, maxBoost)
+    const newMax = AUTOMATIC_MAX_WPM + newBoost
+    setManualSpeedBoost(newBoost)
+    controlsRef.current.manualBoostSpeed(BOOST_INCREMENT, newMax)
+  }
+
+  const handleSpeedUpRef = useRef(handleSpeedUp)
+  handleSpeedUpRef.current = handleSpeedUp
+
   // Restore session on mount.
   useEffect(() => {
     if (!initialSession) return
@@ -73,7 +96,7 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const { pacings, chunks, results, status: analysisStatus, currentChunkResult } = useAnalysis(
+  const { pacings, chunks, results, status: analysisStatus, hadErrors: analysisHadErrors, currentChunkResult } = useAnalysis(
     model,
     state.currentTokenId,
   )
@@ -135,6 +158,11 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
           e.preventDefault()
           setMode((m) => m === "baseline" ? "adaptive" : "baseline")
           break
+        case "=":
+        case "+":
+          e.preventDefault()
+          handleSpeedUpRef.current()
+          break
         case "Escape":
           e.preventDefault()
           onExitRef.current(buildExitSession())
@@ -149,11 +177,19 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
       }
     }
 
+    // If the window loses focus while H is held, keyup will never fire.
+    // Flush the active highlight so the app doesn't stay stuck in highlight mode.
+    function handleWindowBlur() {
+      highlighterRef.current.flushHighlight()
+    }
+
     el.addEventListener("keydown", handleKeyDown)
     el.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("blur", handleWindowBlur)
     return () => {
       el.removeEventListener("keydown", handleKeyDown)
       el.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("blur", handleWindowBlur)
     }
   }, [controls, buildExitSession])
 
@@ -166,8 +202,14 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
   }
 
   const canDownloadPdf = onDownloadPdf != null && highlighter.highlights.length > 0
-  function handleDownloadPdf() {
-    onDownloadPdf?.(highlighter.highlights)
+  async function handleDownloadPdf() {
+    if (!onDownloadPdf) return
+    setExportError(null)
+    try {
+      await onDownloadPdf(highlighter.highlights)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed.")
+    }
   }
 
   return (
@@ -190,12 +232,29 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
         />
       </main>
 
+      {exportError && (
+        <div
+          role="alert"
+          className="mx-4 mb-2 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-xs text-red-700 dark:text-red-300 flex items-start gap-3"
+        >
+          <span className="flex-1">{exportError}</span>
+          <button
+            onClick={() => setExportError(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <ReaderControls
         state={state}
         totalTokens={model.tokens.length}
         controls={controls}
         onExit={handleExit}
         analysisStatus={analysisStatus}
+        analysisHadErrors={analysisHadErrors}
         currentDifficulty={currentDifficulty}
         highlightCount={highlighter.highlights.length}
         onDownloadPdf={canDownloadPdf ? handleDownloadPdf : null}
@@ -203,6 +262,10 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
         onModeChange={setMode}
         chunks={chunks}
         pacings={pacings}
+        manualSpeedBoost={manualSpeedBoost}
+        onSpeedUp={handleSpeedUp}
+        automaticMaxWpm={AUTOMATIC_MAX_WPM}
+        manualMaxWpmCap={MANUAL_MAX_WPM_CAP}
       />
     </div>
   )

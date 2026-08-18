@@ -14,6 +14,8 @@ interface Props {
   controls: Controls
   onExit: () => void
   analysisStatus: AnalysisStatus
+  /** True when one or more analysis batches failed permanently after retries. */
+  analysisHadErrors?: boolean
   currentDifficulty: ChunkDifficultyResult | null
   highlightCount: number
   onDownloadPdf?: (() => void) | null
@@ -21,6 +23,10 @@ interface Props {
   onModeChange: (m: ReadingMode) => void
   chunks: AnalysisChunk[]
   pacings: ChunkPacing[]
+  manualSpeedBoost: number
+  onSpeedUp: () => void
+  automaticMaxWpm: number
+  manualMaxWpmCap: number
 }
 
 const LEVEL_COLOR: Record<string, string> = {
@@ -53,6 +59,7 @@ export function ReaderControls({
   controls,
   onExit,
   analysisStatus,
+  analysisHadErrors = false,
   currentDifficulty,
   highlightCount,
   onDownloadPdf,
@@ -60,6 +67,10 @@ export function ReaderControls({
   onModeChange,
   chunks,
   pacings,
+  manualSpeedBoost,
+  onSpeedUp,
+  automaticMaxWpm,
+  manualMaxWpmCap,
 }: Props) {
   const { status, currentTokenId, currentBaseWpm, activeReadingMs } = state
   const isPlaying = status === "playing"
@@ -134,7 +145,7 @@ export function ReaderControls({
 
       {/* ── Main controls row ────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-4">
-        {/* Left: WPM + position */}
+        {/* Left: WPM + speed boost + position */}
         <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums flex-wrap">
           <span className="font-medium text-zinc-700 dark:text-zinc-300">
             {effectiveWpm} <span className="font-normal">WPM</span>
@@ -142,6 +153,24 @@ export function ReaderControls({
           {isSlowed && (
             <span className="text-zinc-400 dark:text-zinc-500">
               (base {currentBaseWpm})
+            </span>
+          )}
+          {/* Manual speed boost control */}
+          {(automaticMaxWpm + manualSpeedBoost) < manualMaxWpmCap ? (
+            <button
+              onClick={onSpeedUp}
+              title={`Faster (=) — raise max to ${automaticMaxWpm + manualSpeedBoost + 25} WPM`}
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors font-mono text-[10px] leading-none"
+              aria-label="Increase reading speed"
+            >
+              +faster
+            </button>
+          ) : (
+            <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">max</span>
+          )}
+          {manualSpeedBoost > 0 && (
+            <span className="text-zinc-400 dark:text-zinc-500">
+              /{automaticMaxWpm + manualSpeedBoost}
             </span>
           )}
           <span className="text-zinc-300 dark:text-zinc-600" aria-hidden="true">·</span>
@@ -183,6 +212,8 @@ export function ReaderControls({
             <kbd className="font-mono">Space</kbd> play/pause
             <span className="mx-1.5 text-zinc-300 dark:text-zinc-600">·</span>
             <kbd className="font-mono">H</kbd> mark
+            <span className="mx-1.5 text-zinc-300 dark:text-zinc-600">·</span>
+            <kbd className="font-mono">=</kbd> faster
           </span>
           <button
             onClick={onExit}
@@ -224,7 +255,14 @@ export function ReaderControls({
         {/* Difficulty info */}
         <span className="font-mono text-zinc-400 dark:text-zinc-500">
           {mode === "adaptive" && analysisStatus === "pending" && "analyzing…"}
-          {mode === "adaptive" && analysisStatus === "error" && "⚠ analysis unavailable"}
+          {mode === "adaptive" && analysisStatus === "error" && (
+            <span className="text-zinc-500 dark:text-zinc-400">
+              Adaptive analysis temporarily unavailable — using baseline pacing
+            </span>
+          )}
+          {mode === "adaptive" && analysisStatus === "done" && analysisHadErrors && !currentDifficulty && (
+            <span className="text-zinc-500 dark:text-zinc-400">⚠ partial analysis unavailable</span>
+          )}
           {mode === "adaptive" && (analysisStatus === "done" || analysisStatus === "idle") && currentDifficulty && (
             <>
               {isSlowed ? (
@@ -236,10 +274,16 @@ export function ReaderControls({
                   <span className="text-zinc-600 dark:text-zinc-300">
                     {currentBaseWpm} → {effectiveWpm} WPM
                   </span>
+                  {analysisHadErrors && (
+                    <span className="ml-2 text-zinc-400 dark:text-zinc-500">⚠ partial</span>
+                  )}
                 </span>
               ) : (
                 <span className="text-zinc-400 dark:text-zinc-600">
                   {LEVEL_LABEL[currentDifficulty.level]} difficulty
+                  {analysisHadErrors && (
+                    <span className="ml-2 text-zinc-400 dark:text-zinc-500">⚠ partial</span>
+                  )}
                 </span>
               )}
             </>

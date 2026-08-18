@@ -6,11 +6,10 @@ import { RAMP_START_WPM, RAMP_MAX_WPM, RAMP_DURATION_MS } from "./types"
  * Linear ramp from startWpm to targetMaxWpm over rampDurationMs of active
  * reading (paused time does not advance the ramp).
  *
- *   0:00  → 220 WPM
- *   0:30  → ~240 WPM
- *   1:00  → ~260 WPM
- *   ...
- *   3:30+ → 350 WPM (capped at targetMaxWpm)
+ *   0:00  → 240 WPM
+ *   1:00  → ~277 WPM
+ *   2:00  → ~313 WPM
+ *   3:30+ → 350 WPM (capped at targetMaxWpm; manual boost can raise ceiling to 500)
  *
  * This function is pure — callers own the activeReadingMs counter.
  */

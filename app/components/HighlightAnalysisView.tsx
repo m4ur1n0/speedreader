@@ -13,6 +13,7 @@ import type { ReaderHighlight } from "@/app/lib/highlight/types"
 import type { HighlightAnalysis } from "@/app/lib/highlightAnalysis/types"
 import type { HighlightAnalysisControls } from "@/app/lib/highlightAnalysis/useHighlightAnalysis"
 import { normalizeHighlightRanges } from "@/app/lib/highlight/normalize"
+import { ThemeToggle } from "@/app/components/ThemeToggle"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -221,6 +222,8 @@ export function HighlightAnalysisView({ doc, highlights, controls, onClose }: Pr
             {isRunning && " · analyzing…"}
           </span>
         </div>
+
+        <ThemeToggle />
       </header>
 
       {isMobile ? (
@@ -892,11 +895,12 @@ function AnnotationCard({
                   placeholder="Ask a follow-up question…"
                   rows={2}
                   maxLength={MAX_FOLLOW_UP_CHARS}
-                  className="w-full rounded px-2.5 py-1.5 text-[0.8125rem] placeholder:text-ink-3 resize-none focus:outline-none"
+                  className="w-full rounded px-2.5 py-1.5 text-[0.8125rem] placeholder:text-ink-3 resize-none"
                   style={{
                     background: "var(--surface-inset)",
                     border: "1px solid var(--border)",
                     color: "var(--ink-1)",
+                    fontFamily: "var(--font-sans)",
                   }}
                 />
                 <div className="flex items-center justify-between">

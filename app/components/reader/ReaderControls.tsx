@@ -1,5 +1,6 @@
 "use client"
 
+import React from "react"
 import type { PlayerState } from "@/app/lib/reader/types"
 import type { ReaderControls as Controls } from "@/app/lib/reader/player"
 import type { AnalysisStatus, ChunkDifficultyResult, AnalysisChunk, ChunkPacing } from "@/app/lib/analysis/types"
@@ -290,20 +291,21 @@ export function ReaderControls({
 
           {/* Keyboard hints — desktop only */}
           <span className="hidden lg:flex items-center gap-1.5 text-[10px] font-mono text-ink-3">
-            <kbd className="text-ink-3">Space</kbd>
+            <Kbd>Space</Kbd>
             <span aria-hidden="true">·</span>
-            <kbd className="text-ink-3">H</kbd> mark
+            <Kbd>H</Kbd> mark
             <span aria-hidden="true">·</span>
-            <kbd className="text-ink-3">=</kbd> faster
+            <Kbd>=</Kbd> faster
           </span>
 
           {/* Exit */}
           <button
             onClick={onExit}
             aria-label="Exit reader"
-            className="flex items-center gap-1 text-[11px] font-mono text-ink-3 hover:text-ink-1 transition-colors px-2 py-1 rounded focus-visible:outline-accent"
+            className="flex items-center gap-1.5 text-[11px] font-mono text-ink-3 hover:text-ink-1 transition-colors px-2 py-1 rounded focus-visible:outline-2"
+            style={{ outlineColor: "var(--accent)" }}
           >
-            <span className="hidden sm:inline text-[10px]"><kbd>Esc</kbd></span>
+            <Kbd className="hidden sm:inline-flex">Esc</Kbd>
             <span>Exit</span>
           </button>
         </div>
@@ -351,6 +353,21 @@ export function ReaderControls({
         </div>
       )}
     </div>
+  )
+}
+
+function Kbd({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <kbd
+      className={`inline-flex items-center px-1 py-px rounded text-[9px] font-mono leading-none ${className}`}
+      style={{
+        background: "var(--surface-inset)",
+        border: "1px solid var(--border)",
+        color: "var(--ink-2)",
+      }}
+    >
+      {children}
+    </kbd>
   )
 }
 

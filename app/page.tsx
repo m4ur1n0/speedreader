@@ -18,6 +18,7 @@ import {
   NORMAL_READING_WPM,
 } from "./lib/reader/statsHelpers";
 import { RAMP_MAX_WPM } from "./lib/reader/types";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 export default function Home() {
   const [doc, setDoc] = useState<ParsedDocument | null>(null);
@@ -130,21 +131,25 @@ export default function Home() {
 
         {doc && (
           <>
-            <span className="w-px h-3" style={{ background: "var(--border)" }} aria-hidden="true" />
+            <span className="w-px h-3 shrink-0" style={{ background: "var(--border)" }} aria-hidden="true" />
             <span className="text-sm text-ink-2 truncate max-w-[18rem] sm:max-w-sm">
               {doc.metadata.fileName}
             </span>
-            <span className="ml-auto">
-              <button
-                onClick={() => handleDocumentParsed(null, null)}
-                className="text-[11px] font-mono transition-colors hover:text-ink-2"
-                style={{ color: "var(--ink-3)" }}
-              >
-                change
-              </button>
-            </span>
           </>
         )}
+
+        <div className="ml-auto flex items-center gap-3">
+          {doc && (
+            <button
+              onClick={() => handleDocumentParsed(null, null)}
+              className="text-[11px] font-mono transition-colors hover:text-ink-2"
+              style={{ color: "var(--ink-3)" }}
+            >
+              change
+            </button>
+          )}
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* ── Main content ───────────────────────────────────────────────────── */}

@@ -67,6 +67,65 @@
   }
 }
 
+/* ── Forced theme overrides (data-theme beats prefers-color-scheme) ──────── */
+[data-theme="dark"] {
+  --bg:              #141210;
+  --surface:         #1A1815;
+  --surface-raised:  #222019;
+  --surface-inset:   #0F0D0B;
+
+  --border:          #2C2920;
+  --border-subtle:   #221F18;
+
+  --ink-1: #EDE8DF;
+  --ink-2: #9E9690;
+  --ink-3: #65605A;
+
+  --accent:        #3B82F6;
+  --accent-hover:  #60A5FA;
+  --accent-soft:   #172554;
+  --accent-border: #1E3A8A;
+  --accent-ink:    #FFFFFF;
+
+  --hl:        #F59E0B;
+  --hl-soft:   rgba(217, 119, 6, 0.22);
+  --hl-active: rgba(245, 158, 11, 0.45);
+  --hl-border: #5C3A04;
+
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --danger:  #EF4444;
+}
+
+[data-theme="light"] {
+  --bg:              #F3EFE7;
+  --surface:         #FAF7F0;
+  --surface-raised:  #FFFFFF;
+  --surface-inset:   #EAE5DC;
+
+  --border:          #CDC7BC;
+  --border-subtle:   #DDD8CE;
+
+  --ink-1: #1C1917;
+  --ink-2: #57534E;
+  --ink-3: #A8A29E;
+
+  --accent:        #1D4ED8;
+  --accent-hover:  #1E40AF;
+  --accent-soft:   #EFF6FF;
+  --accent-border: #BFDBFE;
+  --accent-ink:    #FFFFFF;
+
+  --hl:        #D97706;
+  --hl-soft:   rgba(251, 191, 36, 0.18);
+  --hl-active: rgba(245, 158, 11, 0.50);
+  --hl-border: #FDE68A;
+
+  --success: #15803D;
+  --warning: #B45309;
+  --danger:  #B91C1C;
+}
+
 /* ── Tailwind v4: generate utility classes from tokens ─────────────────── */
 @theme inline {
   /* Legacy compat */

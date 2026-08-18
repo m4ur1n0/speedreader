@@ -14,7 +14,6 @@ interface Props {
   controls: Controls
   onExit: () => void
   analysisStatus: AnalysisStatus
-  /** True when one or more analysis batches failed permanently after retries. */
   analysisHadErrors?: boolean
   currentDifficulty: ChunkDifficultyResult | null
   highlightCount: number
@@ -29,28 +28,20 @@ interface Props {
   manualMaxWpmCap: number
 }
 
-const LEVEL_COLOR: Record<string, string> = {
-  normal: "bg-green-400/40",
-  mild: "bg-lime-400/40",
-  moderate: "bg-yellow-400/40",
-  high: "bg-orange-400/40",
-  very_high: "bg-red-400/50",
-}
-
-const LEVEL_TEXT: Record<string, string> = {
-  normal: "text-green-600 dark:text-green-400",
-  mild: "text-lime-600 dark:text-lime-400",
-  moderate: "text-yellow-600 dark:text-yellow-400",
-  high: "text-orange-600 dark:text-orange-400",
-  very_high: "text-red-600 dark:text-red-400",
+/* Difficulty → color for progress bar marks (CSS bg strings) */
+const LEVEL_MARK_COLOR: Record<string, string> = {
+  mild:     "rgba(234, 179, 8, 0.30)",
+  moderate: "rgba(249, 115, 22, 0.30)",
+  high:     "rgba(239, 68, 68, 0.35)",
+  very_high:"rgba(239, 68, 68, 0.50)",
 }
 
 const LEVEL_LABEL: Record<string, string> = {
-  normal: "Normal",
-  mild: "Mild",
+  normal:   "Normal",
+  mild:     "Mild",
   moderate: "Moderate",
-  high: "High",
-  very_high: "Very High",
+  high:     "High",
+  very_high:"Dense",
 }
 
 export function ReaderControls({
@@ -87,18 +78,15 @@ export function ReaderControls({
       : currentBaseWpm
   const isSlowed = mode === "adaptive" && multiplier < 0.99
 
-  // ── Estimated time remaining ────────────────────────────────────────────────
   const wordsRemaining = Math.max(0, totalTokens - currentTokenId)
   const estRemSec = effectiveWpm > 0 ? (wordsRemaining / effectiveWpm) * 60 : 0
 
-  // ── Session stats ───────────────────────────────────────────────────────────
   const activeReadingSec = activeReadingMs / 1000
   const avgWpm = activeReadingMs > 0
     ? Math.round((currentTokenId / activeReadingMs) * 60_000)
     : currentBaseWpm
 
-  // ── Difficulty marks for progress bar ──────────────────────────────────────
-  // Show a subtle colored mark for each chunk rated above "normal".
+  /* Difficulty marks for progress bar */
   const difficultyMarks = pacings
     .filter((p) => {
       const chunk = chunks.find((c) => c.id === p.chunkId)
@@ -118,23 +106,69 @@ export function ReaderControls({
       return { startPct, widthPct, level }
     })
 
-  return (
-    <div className="w-full flex flex-col gap-3 px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 bg-background">
+  const canSpeedUp = (automaticMaxWpm + manualSpeedBoost) < manualMaxWpmCap
+  const effectiveCeiling = automaticMaxWpm + manualSpeedBoost
 
-      {/* ── Progress bar with difficulty marks ─────────────────────────────── */}
-      <div className="relative h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
-        {/* Difficulty region marks (drawn before the progress fill) */}
+  /* Adaptive status line text */
+  let adaptiveInfo: React.ReactNode = null
+  if (mode === "adaptive") {
+    if (analysisStatus === "pending") {
+      adaptiveInfo = <span className="text-ink-3">analyzing…</span>
+    } else if (analysisStatus === "error") {
+      adaptiveInfo = <span className="text-ink-3">Adaptive unavailable — baseline pacing</span>
+    } else if (currentDifficulty) {
+      const label = LEVEL_LABEL[currentDifficulty.level] ?? currentDifficulty.level
+      if (isSlowed) {
+        adaptiveInfo = (
+          <span>
+            <span className="text-warning">{label}</span>
+            <span className="text-ink-3"> · slowing to {effectiveWpm} WPM</span>
+            {analysisHadErrors && <span className="text-ink-3"> · partial</span>}
+          </span>
+        )
+      } else {
+        adaptiveInfo = (
+          <span className="text-ink-3">
+            {label} difficulty{analysisHadErrors && " · partial"}
+          </span>
+        )
+      }
+    }
+  }
+
+  return (
+    <div
+      className="shrink-0 w-full"
+      style={{
+        background: "var(--surface)",
+        borderTop: "1px solid var(--border-subtle)",
+      }}
+    >
+      {/* ── Thin progress bar ────────────────────────────────────────────── */}
+      <div
+        className="relative w-full overflow-hidden"
+        style={{ height: "2px", background: "var(--surface-inset)" }}
+      >
+        {/* Difficulty region marks */}
         {difficultyMarks.map((m, i) => (
           <div
             key={i}
-            className={`absolute inset-y-0 ${LEVEL_COLOR[m.level] ?? "bg-orange-400/40"}`}
-            style={{ left: `${m.startPct.toFixed(2)}%`, width: `${m.widthPct.toFixed(2)}%` }}
+            className="absolute inset-y-0"
+            style={{
+              left: `${m.startPct.toFixed(2)}%`,
+              width: `${m.widthPct.toFixed(2)}%`,
+              background: LEVEL_MARK_COLOR[m.level] ?? "rgba(239,68,68,0.3)",
+            }}
             aria-hidden="true"
           />
         ))}
+        {/* Progress fill */}
         <div
-          className="absolute inset-y-0 left-0 bg-blue-500 rounded-full transition-all duration-75"
-          style={{ width: `${progressPct.toFixed(1)}%` }}
+          className="absolute inset-y-0 left-0 transition-all duration-75"
+          style={{
+            width: `${progressPct.toFixed(1)}%`,
+            background: "var(--accent)",
+          }}
           role="progressbar"
           aria-valuenow={Math.round(progressPct)}
           aria-valuemin={0}
@@ -143,191 +177,164 @@ export function ReaderControls({
         />
       </div>
 
-      {/* ── Main controls row ────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-4">
-        {/* Left: WPM + speed boost + position */}
-        <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums flex-wrap">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">
-            {effectiveWpm} <span className="font-normal">WPM</span>
-          </span>
-          {isSlowed && (
-            <span className="text-zinc-400 dark:text-zinc-500">
-              (base {currentBaseWpm})
+      {/* ── Main control strip ───────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-4 sm:px-5 h-14">
+
+        {/* Left: play/pause + WPM */}
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={isFinished ? undefined : controls.togglePlayPause}
+            disabled={isFinished}
+            aria-label={isPlaying ? "Pause" : "Play"}
+            className="flex items-center justify-center w-9 h-9 rounded-full disabled:opacity-30 transition-opacity hover:opacity-80 active:opacity-60 focus-visible:outline-2 shrink-0"
+            style={{
+              background: "var(--ink-1)",
+              color: "var(--bg)",
+            }}
+          >
+            {isPlaying ? (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                <rect x="2.5" y="1.5" width="3.5" height="11" rx="1" />
+                <rect x="8" y="1.5" width="3.5" height="11" rx="1" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5 translate-x-px" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                <path d="M3 2a.5.5 0 0 1 .745-.434l8 5a.5.5 0 0 1 0 .868l-8 5A.5.5 0 0 1 3 12V2Z" />
+              </svg>
+            )}
+          </button>
+
+          {/* WPM display */}
+          <div className="flex items-baseline gap-1 tabular-nums">
+            <span className="text-[1.375rem] font-mono font-semibold tracking-tight text-ink-1 leading-none">
+              {effectiveWpm}
             </span>
-          )}
-          {/* Manual speed boost control */}
-          {(automaticMaxWpm + manualSpeedBoost) < manualMaxWpmCap ? (
+            <span className="text-[10px] text-ink-3 font-mono leading-none">WPM</span>
+          </div>
+
+          {/* Speed controls */}
+          {canSpeedUp ? (
             <button
               onClick={onSpeedUp}
-              title={`Faster (=) — raise max to ${automaticMaxWpm + manualSpeedBoost + 25} WPM`}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors font-mono text-[10px] leading-none"
+              title={`Faster (=) — raise ceiling to ${effectiveCeiling + 25} WPM`}
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded border text-ink-3 transition-colors hover:text-accent focus-visible:outline-accent"
+              style={{ borderColor: "var(--border)" }}
               aria-label="Increase reading speed"
             >
               +faster
             </button>
           ) : (
-            <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">max</span>
+            <span className="text-[10px] font-mono text-ink-3">max</span>
           )}
           {manualSpeedBoost > 0 && (
-            <span className="text-zinc-400 dark:text-zinc-500">
-              /{automaticMaxWpm + manualSpeedBoost}
+            <span className="text-[10px] font-mono text-ink-3 hidden sm:inline">
+              /{effectiveCeiling}
             </span>
-          )}
-          <span className="text-zinc-300 dark:text-zinc-600" aria-hidden="true">·</span>
-          <span>{progressPct.toFixed(0)}%</span>
-          <span className="text-zinc-300 dark:text-zinc-600" aria-hidden="true">·</span>
-          <span>{formatDuration(estRemSec)} left</span>
-          {highlightCount > 0 && (
-            <>
-              <span className="text-zinc-300 dark:text-zinc-600" aria-hidden="true">·</span>
-              <span className="text-amber-600 dark:text-amber-400">
-                {highlightCount} {highlightCount === 1 ? "mark" : "marks"}
-              </span>
-            </>
           )}
         </div>
 
-        {/* Center: play/pause */}
-        <button
-          onClick={isFinished ? undefined : controls.togglePlayPause}
-          disabled={isFinished}
-          aria-label={isPlaying ? "Pause" : "Play"}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-2 focus-visible:outline-blue-500 shrink-0"
-        >
-          {isPlaying ? (
-            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <rect x="3" y="2" width="4" height="12" rx="1" />
-              <rect x="9" y="2" width="4" height="12" rx="1" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4 translate-x-px" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M4 2.5a.5.5 0 0 1 .748-.432l8 5.5a.5.5 0 0 1 0 .864l-8 5.5A.5.5 0 0 1 4 13.5v-11Z" />
-            </svg>
-          )}
-        </button>
-
-        {/* Right: hints + exit */}
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:block text-xs text-zinc-400 dark:text-zinc-500">
-            <kbd className="font-mono">Space</kbd> play/pause
-            <span className="mx-1.5 text-zinc-300 dark:text-zinc-600">·</span>
-            <kbd className="font-mono">H</kbd> mark
-            <span className="mx-1.5 text-zinc-300 dark:text-zinc-600">·</span>
-            <kbd className="font-mono">=</kbd> faster
-          </span>
-          <button
-            onClick={onExit}
-            aria-label="Exit reader"
-            className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors focus-visible:outline-2 focus-visible:outline-blue-500 rounded px-2 py-1"
-          >
-            <span className="hidden sm:inline mr-1"><kbd className="font-mono">Esc</kbd></span>
-            Exit
-          </button>
-        </div>
-      </div>
-
-      {/* ── Mode toggle + difficulty indicator ──────────────────────────────── */}
-      <div className="flex items-center gap-4 text-xs min-h-[1.25rem]">
-        {/* Baseline / Adaptive toggle */}
-        <div className="flex items-center gap-1 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700">
-          <button
-            onClick={() => onModeChange("baseline")}
-            className={`px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              mode === "baseline"
-                ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
-                : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            }`}
-          >
-            Baseline
-          </button>
-          <button
-            onClick={() => onModeChange("adaptive")}
-            className={`px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              mode === "adaptive"
-                ? "bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100"
-                : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            }`}
-          >
-            Adaptive
-          </button>
-        </div>
-
-        {/* Difficulty info */}
-        <span className="font-mono text-zinc-400 dark:text-zinc-500">
-          {mode === "adaptive" && analysisStatus === "pending" && "analyzing…"}
-          {mode === "adaptive" && analysisStatus === "error" && (
-            <span className="text-zinc-500 dark:text-zinc-400">
-              Adaptive analysis temporarily unavailable — using baseline pacing
-            </span>
-          )}
-          {mode === "adaptive" && analysisStatus === "done" && analysisHadErrors && !currentDifficulty && (
-            <span className="text-zinc-500 dark:text-zinc-400">⚠ partial analysis unavailable</span>
-          )}
-          {mode === "adaptive" && (analysisStatus === "done" || analysisStatus === "idle") && currentDifficulty && (
-            <>
-              {isSlowed ? (
-                <span>
-                  <span className={LEVEL_TEXT[currentDifficulty.level]}>
-                    {LEVEL_LABEL[currentDifficulty.level]}
-                  </span>
-                  {" — slowing "}
-                  <span className="text-zinc-600 dark:text-zinc-300">
-                    {currentBaseWpm} → {effectiveWpm} WPM
-                  </span>
-                  {analysisHadErrors && (
-                    <span className="ml-2 text-zinc-400 dark:text-zinc-500">⚠ partial</span>
-                  )}
-                </span>
-              ) : (
-                <span className="text-zinc-400 dark:text-zinc-600">
-                  {LEVEL_LABEL[currentDifficulty.level]} difficulty
-                  {analysisHadErrors && (
-                    <span className="ml-2 text-zinc-400 dark:text-zinc-500">⚠ partial</span>
-                  )}
-                </span>
-              )}
-            </>
-          )}
-          {mode === "baseline" && (
-            <span className="text-zinc-400 dark:text-zinc-600">AI pacing off</span>
-          )}
-        </span>
-      </div>
-
-      {/* ── Finished state ───────────────────────────────────────────────────── */}
-      {isFinished && (
-        <div className="flex flex-col gap-3 pt-1 border-t border-zinc-100 dark:border-zinc-800">
-          {/* Session summary */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            <span>Words read</span>
-            <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
-              {currentTokenId.toLocaleString()}
-            </span>
-            <span>Active reading</span>
-            <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
-              {formatDuration(activeReadingSec)}
-            </span>
-            <span>Average speed</span>
-            <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
-              {avgWpm} WPM
-            </span>
-            <span>Normal pace would take</span>
-            <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
-              {formatDuration(estimateNormalReadingSeconds(currentTokenId))}
-            </span>
+        {/* Center: progress info + adaptive status */}
+        <div className="flex-1 min-w-0 flex flex-col items-center">
+          <div className="flex items-center gap-2 text-[11px] font-mono text-ink-3 tabular-nums">
+            <span>{progressPct.toFixed(0)}%</span>
+            <span aria-hidden="true">·</span>
+            <span className="hidden xs:inline">{formatDuration(estRemSec)} left</span>
             {highlightCount > 0 && (
               <>
-                <span>Highlights</span>
-                <span className="tabular-nums font-medium text-amber-600 dark:text-amber-400">
-                  {highlightCount}
-                </span>
+                <span aria-hidden="true" className="hidden sm:inline">·</span>
+                <span className="hidden sm:inline text-hl">{highlightCount} {highlightCount === 1 ? "mark" : "marks"}</span>
               </>
             )}
           </div>
+          {adaptiveInfo && (
+            <div className="text-[10px] font-mono leading-none mt-0.5 hidden sm:block">
+              {adaptiveInfo}
+            </div>
+          )}
+        </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
+        {/* Right: mode toggle + kbd hints + exit */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Mode toggle */}
+          <div
+            className="hidden sm:flex items-center rounded overflow-hidden text-[10px] font-mono"
+            style={{ border: "1px solid var(--border)" }}
+          >
             <button
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              onClick={() => onModeChange("baseline")}
+              className={`px-2 py-1 transition-colors ${
+                mode === "baseline"
+                  ? "text-ink-1 font-medium"
+                  : "text-ink-3 hover:text-ink-2"
+              }`}
+              style={mode === "baseline" ? { background: "var(--surface-inset)" } : undefined}
+              aria-pressed={mode === "baseline"}
+            >
+              B
+            </button>
+            <div style={{ width: "1px", background: "var(--border)", alignSelf: "stretch" }} />
+            <button
+              onClick={() => onModeChange("adaptive")}
+              className={`px-2 py-1 transition-colors ${
+                mode === "adaptive"
+                  ? "text-ink-1 font-medium"
+                  : "text-ink-3 hover:text-ink-2"
+              }`}
+              style={mode === "adaptive" ? { background: "var(--surface-inset)" } : undefined}
+              aria-pressed={mode === "adaptive"}
+              aria-label="Adaptive mode"
+            >
+              A
+            </button>
+          </div>
+
+          {/* Keyboard hints — desktop only */}
+          <span className="hidden lg:flex items-center gap-1.5 text-[10px] font-mono text-ink-3">
+            <kbd className="text-ink-3">Space</kbd>
+            <span aria-hidden="true">·</span>
+            <kbd className="text-ink-3">H</kbd> mark
+            <span aria-hidden="true">·</span>
+            <kbd className="text-ink-3">=</kbd> faster
+          </span>
+
+          {/* Exit */}
+          <button
+            onClick={onExit}
+            aria-label="Exit reader"
+            className="flex items-center gap-1 text-[11px] font-mono text-ink-3 hover:text-ink-1 transition-colors px-2 py-1 rounded focus-visible:outline-accent"
+          >
+            <span className="hidden sm:inline text-[10px]"><kbd>Esc</kbd></span>
+            <span>Exit</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Finished reading receipt ─────────────────────────────────────── */}
+      {isFinished && (
+        <div
+          className="px-4 sm:px-5 pb-5 pt-1"
+          style={{ borderTop: "1px solid var(--border-subtle)" }}
+        >
+          <p className="text-[10px] font-mono uppercase tracking-widest text-ink-3 mb-3">
+            Session complete
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 mb-4">
+            <StatItem label="Words read" value={currentTokenId.toLocaleString()} />
+            <StatItem label="Active time" value={formatDuration(activeReadingSec)} />
+            <StatItem label="Avg speed" value={`${avgWpm} WPM`} mono />
+            <StatItem
+              label="Normal pace"
+              value={formatDuration(estimateNormalReadingSeconds(currentTokenId))}
+            />
+            {highlightCount > 0 && (
+              <StatItem label="Highlights" value={String(highlightCount)} accent />
+            )}
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap">
+            <button
+              className="text-xs text-accent hover:text-accent-hover transition-colors font-medium"
               onClick={() => controls.seekToToken(0)}
             >
               Restart
@@ -335,14 +342,39 @@ export function ReaderControls({
             {onDownloadPdf && highlightCount > 0 && (
               <button
                 onClick={onDownloadPdf}
-                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors"
+                className="text-xs text-ink-2 hover:text-ink-1 transition-colors"
               >
-                Download highlighted PDF
+                Export highlighted PDF
               </button>
             )}
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function StatItem({
+  label,
+  value,
+  mono,
+  accent,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  accent?: boolean
+}) {
+  return (
+    <div>
+      <p className="text-[10px] font-mono uppercase tracking-wider text-ink-3 mb-0.5">{label}</p>
+      <p
+        className={`text-sm font-medium ${
+          accent ? "text-hl" : "text-ink-1"
+        } ${mono ? "font-mono tabular-nums" : ""}`}
+      >
+        {value}
+      </p>
     </div>
   )
 }

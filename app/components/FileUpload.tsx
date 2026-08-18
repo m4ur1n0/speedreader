@@ -5,7 +5,6 @@ import type { ParsedDocument } from "@/app/lib/document";
 import { ScannedPdfError } from "@/app/lib/document";
 
 const ACCEPTED_EXTENSIONS = new Set(["pdf", "txt", "md", "markdown", "epub", "rtf"]);
-
 const ACCEPT_ATTR = ".pdf,.txt,.md,.markdown,.epub,.rtf";
 
 function formatBytes(bytes: number): string {
@@ -19,13 +18,9 @@ function isAccepted(file: File): boolean {
   return ACCEPTED_EXTENSIONS.has(ext);
 }
 
-// Fast pre-check: scan the first 512 KB for font resources + text operators.
-// Scanned-only PDFs embed pages as images with no font dictionaries or BT/ET blocks.
 async function isPdfTextBased(file: File): Promise<boolean> {
   const slice = file.slice(0, 512 * 1024);
   const buffer = await slice.arrayBuffer();
-  // latin1 maps bytes 0–255 one-to-one to Unicode code points,
-  // preserving ASCII sequences like "/Font" and "BT" in binary PDF streams.
   const sample = new TextDecoder("latin1").decode(buffer);
   return sample.includes("/Font") && sample.includes("BT");
 }
@@ -118,111 +113,131 @@ export default function FileUpload({ onDocumentParsed }: FileUploadProps) {
   const busy = parseState.status === "validating" || parseState.status === "parsing";
   const statusLabel =
     parseState.status === "validating"
-      ? "Checking file…"
+      ? "Checking…"
       : parseState.status === "parsing"
       ? "Parsing…"
       : null;
 
-  return (
-    <div className="w-full max-w-lg">
-      {!file ? (
+  /* Loaded file row */
+  if (file) {
+    return (
+      <div>
         <div
-          role="button"
-          tabIndex={0}
-          onClick={() => !busy && inputRef.current?.click()}
-          onKeyDown={(e) => e.key === "Enter" && !busy && inputRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-8 py-14 transition-colors ${
-            busy
-              ? "cursor-wait border-zinc-300 dark:border-zinc-700"
-              : dragging
-              ? "cursor-pointer border-blue-500 bg-blue-50 dark:bg-blue-950/20"
-              : "cursor-pointer border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500"
-          }`}
+          className="flex items-center gap-3 rounded-lg px-4 py-3 text-sm"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+          }}
         >
+          {/* Document icon */}
           <svg
-            className="h-10 w-10 text-zinc-400"
-            xmlns="http://www.w3.org/2000/svg"
+            className="w-4 h-4 shrink-0"
+            style={{ color: "var(--ink-3)" }}
+            viewBox="0 0 16 16"
             fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={1.5}
             stroke="currentColor"
+            strokeWidth="1.25"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m.75 12 3 3m0 0 3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
-            />
+            <rect x="2" y="1" width="12" height="14" rx="1.5" />
+            <path d="M5 5h6M5 7.5h6M5 10h4" strokeLinecap="round" />
           </svg>
-          <div className="text-center">
-            {statusLabel ? (
-              <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                {statusLabel}
-              </p>
-            ) : (
-              <>
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Drop a file here, or{" "}
-                  <span className="text-blue-600 dark:text-blue-400">browse</span>
-                </p>
-                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
-                  PDF (text-based), TXT, Markdown, EPUB, RTF
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-center gap-4 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-5 py-4">
-          <svg
-            className="h-8 w-8 shrink-0 text-zinc-500"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={1.5}
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
-            />
-          </svg>
+
           <div className="flex-1 min-w-0">
-            <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-              {file.name}
-            </p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="truncate font-medium text-ink-1">{file.name}</p>
+            <p className="text-[11px] font-mono mt-0.5" style={{ color: "var(--ink-3)" }}>
               {formatBytes(file.size)}
-              {file.type ? ` · ${file.type}` : ""}
-              {parseState.status === "parsing" && " · Parsing…"}
+              {parseState.status === "validating" && " · checking…"}
+              {parseState.status === "parsing" && " · parsing…"}
               {parseState.status === "done" &&
-                ` · ${parseState.doc.text.length.toLocaleString()} chars · ${parseState.doc.spans.length.toLocaleString()} spans`}
+                ` · ${parseState.doc.text.length.toLocaleString()} chars`}
             </p>
           </div>
+
           <button
             onClick={clearFile}
-            className="shrink-0 rounded-md p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+            className="shrink-0 p-1 rounded transition-opacity hover:opacity-60"
+            style={{ color: "var(--ink-3)" }}
             aria-label="Remove file"
           >
-            <svg
-              className="h-5 w-5"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
             </svg>
           </button>
         </div>
-      )}
+
+        {error && (
+          <p className="mt-2 text-sm" style={{ color: "var(--danger)" }} role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  /* Drop zone */
+  return (
+    <div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => !busy && inputRef.current?.click()}
+        onKeyDown={(e) => e.key === "Enter" && !busy && inputRef.current?.click()}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        className={`flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed px-8 py-16 transition-colors ${
+          busy
+            ? "cursor-wait"
+            : dragging
+            ? "cursor-pointer"
+            : "cursor-pointer"
+        }`}
+        style={{
+          borderColor: dragging ? "var(--accent)" : "var(--border)",
+          background: dragging ? "var(--accent-soft)" : "transparent",
+        }}
+      >
+        {statusLabel ? (
+          <div className="flex flex-col items-center gap-3">
+            <div
+              className="w-5 h-5 rounded-full border-2 border-t-transparent animate-spin"
+              style={{ borderColor: "var(--ink-3)", borderTopColor: "transparent" }}
+              aria-hidden="true"
+            />
+            <p className="text-sm font-mono" style={{ color: "var(--ink-3)" }}>
+              {statusLabel}
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Upload icon */}
+            <svg
+              className="w-8 h-8"
+              style={{ color: "var(--ink-3)" }}
+              viewBox="0 0 32 32"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M16 21V11M16 11l-4 4M16 11l4 4" strokeLinecap="round" strokeLinejoin="round" />
+              <rect x="4" y="4" width="24" height="24" rx="3" strokeDasharray="0" />
+              <path d="M8 22v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" />
+            </svg>
+
+            <div className="text-center">
+              <p className="text-sm font-medium text-ink-1">
+                Drop a file here,{" "}
+                <span style={{ color: "var(--accent)" }}>or browse</span>
+              </p>
+            </div>
+          </>
+        )}
+      </div>
 
       {error && (
-        <p className="mt-2 text-sm text-red-500">{error}</p>
+        <p className="mt-2 text-sm" style={{ color: "var(--danger)" }} role="alert">
+          {error}
+        </p>
       )}
 
       <input

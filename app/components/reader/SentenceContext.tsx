@@ -12,30 +12,21 @@ interface Props {
   activeHighlight: ActiveHighlight | null
 }
 
-/** Tokens to show before the current word. */
 const CONTEXT_BEFORE = 20
-/** Total window size. */
 const CONTEXT_TOTAL = 60
 
 /**
- * Shows a sliding window of the current sentence centered on the current word.
+ * Transcript ribbon — a sliding window of the current sentence
+ * centered on the current word.
  *
  * Visual zones:
- *   - Already read:  muted
- *   - Current word:  slightly accented (not competing with WordDisplay)
- *   - Upcoming:      standard secondary text
- *
- * The window is anchored to currentTokenId (not sentence start) so the current
- * word is always visible even in very long sentences or PDFs with few sentence
- * boundaries. Adding currentTokenId to the memo deps is the correct fix for the
- * freeze that occurred when the current word advanced past the old fixed-start
- * MAX_LOOKAHEAD limit.
+ *   Already read:  very muted
+ *   Current word:  slightly elevated
+ *   Upcoming:      secondary
  *
  * Highlight styling:
- *   - Finalized highlights: amber underline on covered tokens.
- *   - Active capture: amber underline + subtle background. The current token
- *     gets a stronger accent so it remains visually distinct from past tokens
- *     even when everything is inside the active range.
+ *   Finalized: amber underline on covered tokens.
+ *   Active: amber underline + soft background.
  */
 export function SentenceContext({
   model,
@@ -50,9 +41,6 @@ export function SentenceContext({
     if (!currentToken) return []
     const { sentenceId } = currentToken
     const sentenceStart = model.sentenceFirstToken.get(sentenceId) ?? 0
-
-    // Sliding window: start from sentenceStart or (currentTokenId - CONTEXT_BEFORE),
-    // whichever is later, so the current word is always near the front of the strip.
     const windowStart = Math.max(sentenceStart, currentTokenId - CONTEXT_BEFORE)
 
     const result = []
@@ -70,25 +58,23 @@ export function SentenceContext({
   const activeEnd = activeHighlight ? currentTokenId : -1
 
   return (
-    <div className="flex flex-col items-center gap-1 w-full max-w-lg mx-auto px-4">
-      {/* Recording indicator — shown while a highlight is being captured */}
+    <div className="flex flex-col items-center gap-2 w-full max-w-lg mx-auto px-5">
+      {/* Highlight-in-progress indicator */}
       <div
-        className={`h-5 flex items-center gap-1.5 text-xs font-mono text-amber-500 dark:text-amber-400 transition-opacity duration-100 ${
+        className={`h-4 flex items-center gap-1.5 text-[10px] font-mono tracking-wide text-hl transition-opacity duration-100 ${
           activeHighlight ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
         aria-hidden="true"
       >
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-hl animate-pulse" />
         marking
       </div>
 
       {/* Token strip */}
       <div
-        className={`
-          w-full min-h-[3.5rem] flex flex-wrap items-baseline
-          justify-center gap-x-1 gap-y-0.5 transition-opacity duration-150
-          ${paused ? "opacity-60" : "opacity-100"}
-        `}
+        className={`w-full flex flex-wrap items-baseline justify-center gap-x-[0.3em] gap-y-0.5 transition-opacity duration-150 ${
+          paused ? "opacity-50" : "opacity-100"
+        }`}
         aria-hidden="true"
       >
         {sentenceTokens.map((token) => {
@@ -107,28 +93,30 @@ export function SentenceContext({
             <span
               key={token.id}
               className={[
-                "text-sm leading-relaxed transition-colors duration-75",
-                // Base read-state colour.
+                "text-[0.8125rem] leading-relaxed transition-colors duration-75",
                 isPast && !isCurrent
-                  ? "text-zinc-300 dark:text-zinc-600"
+                  ? "text-ink-3"
                   : isCurrent
-                  ? "text-zinc-700 dark:text-zinc-200 font-semibold"
-                  : "text-zinc-500 dark:text-zinc-400",
-                // Finalized highlight (no active capture): amber underline only.
+                  ? "text-ink-1 font-medium"
+                  : "text-ink-2",
                 isFinalized && !isActive
-                  ? "underline decoration-amber-400 dark:decoration-amber-500 decoration-2 underline-offset-2"
+                  ? "underline decoration-hl decoration-2 underline-offset-2"
                   : "",
-                // Active capture: underline on all captured tokens.
-                // Current token inside active range gets a stronger background so
-                // it stays visually distinct from muted past tokens.
                 isActive && isCurrent
-                  ? "underline decoration-amber-500 dark:decoration-amber-400 decoration-2 underline-offset-2 bg-amber-200 dark:bg-amber-800/50 rounded-sm px-px"
+                  ? "underline decoration-hl decoration-2 underline-offset-2 rounded-sm px-px"
                   : isActive
-                  ? "underline decoration-amber-400 dark:decoration-amber-500 decoration-2 underline-offset-2 bg-amber-50 dark:bg-amber-950/30 rounded-sm px-px"
+                  ? "underline decoration-hl decoration-2 underline-offset-2 rounded-sm px-px"
                   : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
+              style={
+                isActive
+                  ? { backgroundColor: "var(--hl-active)" }
+                  : isFinalized && !isActive
+                  ? { backgroundColor: "var(--hl-soft)" }
+                  : undefined
+              }
             >
               {token.text}
             </span>

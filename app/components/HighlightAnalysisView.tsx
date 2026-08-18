@@ -37,23 +37,12 @@ interface PageSegments {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Collapse PDF extraction line-break artifacts.
- * PDF parsers emit \n at every line end in the original layout. These are not
- * intentional soft breaks — the text should reflow. We collapse isolated \n
- * to a space while leaving \n\n+ (real paragraph gaps) intact.
- * Only applied to PDF files, not plain text.
- */
 function collapseLineBreaks(text: string): string {
   return text.replace(/\n(?!\n)/g, (_, offset, str: string) =>
     offset > 0 && str[offset - 1] === "\n" ? "\n" : " "
   )
 }
 
-/**
- * Returns character offsets in doc.text where each new PDF page begins.
- * Empty array for non-PDF or single-page documents.
- */
 function getPdfPageBoundaries(doc: ParsedDocument): number[] {
   if (doc.metadata.fileType !== "pdf") return []
   const boundaries: number[] = []
@@ -69,11 +58,6 @@ function getPdfPageBoundaries(doc: ParsedDocument): number[] {
   return boundaries
 }
 
-/**
- * Computes the text-column width of page 1 in screen pixels (96 dpi),
- * by measuring the bounding box extent of all spans on page 1.
- * Returns null for non-PDF or when no box data is available.
- */
 function getSnappedProseWidth(doc: ParsedDocument): number | null {
   if (doc.metadata.fileType !== "pdf") return null
   let minX = Infinity
@@ -106,18 +90,12 @@ function buildTextSegments(text: string, highlights: ReaderHighlight[]): TextSeg
   return segments
 }
 
-/**
- * Splits doc.text into page blocks (or one block for non-PDF), builds text
- * segments per block with highlight regions mapped to page-relative offsets,
- * and optionally applies PDF line-break collapsing.
- */
 function buildPagedSegments(
   doc: ParsedDocument,
   highlights: ReaderHighlight[]
 ): PageSegments[] {
   const isPdf = doc.metadata.fileType === "pdf"
   const boundaries = getPdfPageBoundaries(doc)
-
   const rangeBounds = [0, ...boundaries, doc.text.length]
 
   return rangeBounds.slice(0, -1).map((start, i) => {
@@ -125,7 +103,6 @@ function buildPagedSegments(
     const pageNum = boundaries.length > 0 ? i + 1 : undefined
     const pageText = doc.text.slice(start, end)
 
-    // Highlights that start within this page range (truncated at page boundary)
     const pageHighlights = highlights
       .filter((h) => h.canonicalStart >= start && h.canonicalStart < end)
       .map((h) => ({
@@ -135,8 +112,6 @@ function buildPagedSegments(
       }))
 
     const rawSegments = buildTextSegments(pageText, pageHighlights)
-
-    // For PDFs: collapse single \n to space in each segment's display text
     const segments = isPdf
       ? rawSegments.map((s) => ({ ...s, text: collapseLineBreaks(s.text) }))
       : rawSegments
@@ -169,8 +144,6 @@ export function HighlightAnalysisView({ doc, highlights, controls, onClose }: Pr
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null)
   const [isMobile, setIsMobile] = useState(false)
 
-  // highlightSpanRefs is shared: desktop uses it for card alignment,
-  // mobile uses it for scrollIntoView on prev/next navigation.
   const highlightSpanRefs = useRef<Map<string, HTMLElement>>(new Map())
 
   const pagedSegments = useMemo(
@@ -193,7 +166,6 @@ export function HighlightAnalysisView({ doc, highlights, controls, onClose }: Pr
 
   function handleHighlightClick(id: string) {
     setActiveHighlightId(id)
-    // On desktop, card scroll-into-view happens inside DesktopLayout via the rail
   }
 
   function handleCardClick(id: string) {
@@ -211,25 +183,43 @@ export function HighlightAnalysisView({ doc, highlights, controls, onClose }: Pr
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
-      <header className="shrink-0 flex items-center gap-4 px-4 sm:px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+    <div
+      className="flex flex-col h-screen overflow-hidden"
+      style={{ background: "var(--bg)" }}
+    >
+      {/* Header */}
+      <header
+        className="shrink-0 flex items-center gap-4 px-5 py-0 h-11"
+        style={{
+          background: "var(--surface)",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
+      >
         <button
           onClick={onClose}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          className="flex items-center gap-1.5 text-xs font-mono text-ink-3 hover:text-ink-1 transition-colors py-1 rounded"
           aria-label="Close analysis"
         >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22z" />
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M10.78 3.22a.75.75 0 0 1 0 1.06L7.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" />
           </svg>
+          Back
         </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-            AI Analysis — {doc.metadata.fileName}
+
+        <div
+          className="w-px h-3.5 shrink-0"
+          style={{ background: "var(--border)" }}
+          aria-hidden="true"
+        />
+
+        <div className="flex-1 min-w-0 flex items-center gap-3">
+          <h1 className="text-sm font-medium text-ink-1 truncate">
+            {doc.metadata.fileName}
           </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          <span className="text-[11px] font-mono text-ink-3 shrink-0">
             {normalized.length} {normalized.length === 1 ? "highlight" : "highlights"}
-            {isRunning && " · Analyzing…"}
-          </p>
+            {isRunning && " · analyzing…"}
+          </span>
         </div>
       </header>
 
@@ -268,8 +258,8 @@ export function HighlightAnalysisView({ doc, highlights, controls, onClose }: Pr
 // ── Desktop layout ────────────────────────────────────────────────────────────
 
 const RAIL_MIN = 200
-const RAIL_MAX = 520
-const RAIL_DEFAULT = 308
+const RAIL_MAX = 480
+const RAIL_DEFAULT = 288
 
 interface DesktopLayoutProps {
   doc: ParsedDocument
@@ -296,23 +286,19 @@ function DesktopLayout({
   onRetry,
   onAskFollowUp,
 }: DesktopLayoutProps) {
-  // Position state lives here — desktop-only
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [cardPositions, setCardPositions] = useState<Map<string, number>>(new Map())
   const [rightColHeight, setRightColHeight] = useState(0)
 
-  // Rail resize state
   const [railWidth, setRailWidth] = useState(RAIL_DEFAULT)
   const [isDragging, setIsDragging] = useState(false)
   const dragState = useRef({ startX: 0, startWidth: 0 })
 
-  // Snap to original page width
   const [snapToPage, setSnapToPage] = useState(false)
   const snappedProseWidth = useMemo(() => getSnappedProseWidth(doc), [doc])
-  const proseMaxWidth = snapToPage && snappedProseWidth ? snappedProseWidth : 700
+  const proseMaxWidth = snapToPage && snappedProseWidth ? snappedProseWidth : 680
 
-  // When active highlight changes, scroll its card into view in the rail
   useEffect(() => {
     if (!activeHighlightId) return
     const card = cardRefs.current.get(activeHighlightId)
@@ -346,13 +332,11 @@ function DesktopLayout({
     setRightColHeight(Math.max(maxBottom + 32, container.scrollHeight))
   }, [highlightSpanRefs])
 
-  // Recompute after analyses arrive, or when layout changes (rail resize, snap toggle)
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(() => recomputePositions())
     return () => cancelAnimationFrame(frame)
   }, [analyses, recomputePositions, railWidth, proseMaxWidth])
 
-  // ResizeObserver for viewport changes
   useEffect(() => {
     const observer = new ResizeObserver(() => recomputePositions())
     const container = scrollContainerRef.current
@@ -360,7 +344,6 @@ function DesktopLayout({
     return () => observer.disconnect()
   }, [recomputePositions])
 
-  // ── Drag handle ─────────────────────────────────────────────────────────────
   function handleDragStart(e: React.MouseEvent) {
     e.preventDefault()
     dragState.current = { startX: e.clientX, startWidth: railWidth }
@@ -370,7 +353,7 @@ function DesktopLayout({
   useEffect(() => {
     if (!isDragging) return
     function onMove(e: MouseEvent) {
-      const delta = dragState.current.startX - e.clientX // drag left = wider rail
+      const delta = dragState.current.startX - e.clientX
       setRailWidth(Math.max(RAIL_MIN, Math.min(RAIL_MAX, dragState.current.startWidth + delta)))
     }
     function onUp() { setIsDragging(false) }
@@ -382,7 +365,6 @@ function DesktopLayout({
     }
   }, [isDragging])
 
-  // Cursor lock while dragging so it doesn't flicker when over text
   useEffect(() => {
     if (isDragging) {
       document.body.style.cursor = "col-resize"
@@ -405,32 +387,33 @@ function DesktopLayout({
 
         {/* Document column */}
         <div className="flex-1 min-w-0 px-10 lg:px-16 py-10">
-          {/* Toolbar: snap button */}
           {snappedProseWidth && (
-            <div className="mb-4 flex items-center gap-2">
+            <div className="mb-5 flex items-center gap-2">
               <button
                 onClick={() => setSnapToPage((p) => !p)}
-                title="Constrain prose to original PDF page column width"
-                className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border transition-colors ${
-                  snapToPage
-                    ? "bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
-                    : "border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-600"
-                }`}
+                className="flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded transition-colors"
+                style={{
+                  border: "1px solid var(--border)",
+                  color: snapToPage ? "var(--accent)" : "var(--ink-3)",
+                  borderColor: snapToPage ? "var(--accent-border)" : "var(--border)",
+                  background: snapToPage ? "var(--accent-soft)" : "transparent",
+                }}
+                title="Constrain to original PDF page width"
               >
-                {/* Page icon */}
-                <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.25">
-                  <rect x="2" y="1" width="10" height="12" rx="1" />
-                  <path d="M4 4h6M4 6.5h6M4 9h4" strokeLinecap="round" />
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.25">
+                  <rect x="1.5" y="0.5" width="9" height="11" rx="1" />
+                  <path d="M3 3h6M3 5.5h6M3 8h3.5" strokeLinecap="round" />
                 </svg>
                 Page width
               </button>
               {snapToPage && snappedProseWidth && (
-                <span className="text-xs text-zinc-400 dark:text-zinc-500">{snappedProseWidth}px</span>
+                <span className="text-[11px] font-mono" style={{ color: "var(--ink-3)" }}>
+                  {snappedProseWidth}px
+                </span>
               )}
             </div>
           )}
 
-          {/* Prose container — left-anchored, width driven by snap or default */}
           <div style={{ maxWidth: proseMaxWidth }}>
             <DocumentText
               pagedSegments={pagedSegments}
@@ -446,21 +429,27 @@ function DesktopLayout({
         {/* Drag handle */}
         <div
           onMouseDown={handleDragStart}
-          className={`w-[6px] shrink-0 cursor-col-resize relative group ${isDragging ? "z-10" : ""}`}
-          title="Drag to resize"
+          className={`w-[5px] shrink-0 cursor-col-resize relative group ${isDragging ? "z-10" : ""}`}
           aria-hidden="true"
         >
-          <div className={`absolute inset-y-0 left-[2px] w-[2px] transition-colors rounded-full ${
-            isDragging
-              ? "bg-blue-500"
-              : "bg-zinc-200 dark:bg-zinc-700 group-hover:bg-blue-400 dark:group-hover:bg-blue-500"
-          }`} />
+          <div
+            className="absolute inset-y-0 left-[2px] w-px transition-colors"
+            style={{
+              background: isDragging
+                ? "var(--accent)"
+                : "var(--border-subtle)",
+            }}
+          />
         </div>
 
         {/* Annotation rail */}
         <div
-          className="shrink-0 relative border-l border-zinc-100 dark:border-zinc-800"
-          style={{ width: railWidth, height: rightColHeight || undefined }}
+          className="shrink-0 relative"
+          style={{
+            width: railWidth,
+            height: rightColHeight || undefined,
+            borderLeft: "1px solid var(--border-subtle)",
+          }}
         >
           {normalized.map((h) => {
             const analysis = analyses.get(h.id)
@@ -474,7 +463,7 @@ function DesktopLayout({
                   else cardRefs.current.delete(h.id)
                 }}
                 style={top !== undefined ? { position: "absolute", top, left: 0, right: 0 } : undefined}
-                className="px-4 py-3"
+                className="px-5 py-3"
               >
                 <AnnotationCard
                   highlight={h}
@@ -494,7 +483,7 @@ function DesktopLayout({
   )
 }
 
-// ── Mobile layout — full-width document + bottom sheet ────────────────────────
+// ── Mobile layout ─────────────────────────────────────────────────────────────
 
 interface MobileLayoutProps {
   doc: ParsedDocument
@@ -545,21 +534,32 @@ function MobileLayout({
         </div>
       </div>
 
+      {/* Bottom sheet */}
       {sheetHighlight && (
         <div
-          className="absolute bottom-0 left-0 right-0 z-20 flex flex-col rounded-t-2xl bg-white dark:bg-zinc-900 shadow-[0_-8px_40px_rgba(0,0,0,0.15)] dark:shadow-[0_-8px_40px_rgba(0,0,0,0.5)]"
-          style={{ maxHeight: "70vh" }}
+          className="absolute bottom-0 left-0 right-0 z-20 flex flex-col rounded-t-2xl"
+          style={{
+            background: "var(--surface-raised)",
+            maxHeight: "70vh",
+            boxShadow: "0 -4px 32px rgba(0,0,0,0.12)",
+          }}
         >
-          <div className="flex justify-center pt-2.5 pb-1 shrink-0">
-            <div className="w-9 h-1 rounded-full bg-zinc-300 dark:bg-zinc-600" />
+          {/* Drag indicator */}
+          <div className="flex justify-center pt-3 pb-1 shrink-0">
+            <div className="w-8 h-1 rounded-full" style={{ background: "var(--border)" }} />
           </div>
 
-          <div className="flex items-center gap-3 px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
+          {/* Sheet header */}
+          <div
+            className="flex items-center gap-3 px-4 py-2 shrink-0"
+            style={{ borderBottom: "1px solid var(--border-subtle)" }}
+          >
             <div className="flex items-center gap-1">
               <button
                 onClick={() => sheetIdx > 0 && onNavigate(normalized[sheetIdx - 1].id)}
                 disabled={sheetIdx <= 0}
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-1.5 rounded transition-colors disabled:opacity-30"
+                style={{ color: "var(--ink-3)" }}
                 aria-label="Previous highlight"
               >
                 <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
@@ -569,7 +569,8 @@ function MobileLayout({
               <button
                 onClick={() => sheetIdx < normalized.length - 1 && onNavigate(normalized[sheetIdx + 1].id)}
                 disabled={sheetIdx >= normalized.length - 1}
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="p-1.5 rounded transition-colors disabled:opacity-30"
+                style={{ color: "var(--ink-3)" }}
                 aria-label="Next highlight"
               >
                 <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
@@ -577,12 +578,13 @@ function MobileLayout({
                 </svg>
               </button>
             </div>
-            <span className="flex-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 text-center">
-              Highlight {sheetIdx + 1} of {normalized.length}
+            <span className="flex-1 text-[11px] font-mono text-center" style={{ color: "var(--ink-3)" }}>
+              {sheetIdx + 1} of {normalized.length}
             </span>
             <button
               onClick={onCloseSheet}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="p-1.5 rounded transition-colors"
+              style={{ color: "var(--ink-3)" }}
               aria-label="Close"
             >
               <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
@@ -591,12 +593,20 @@ function MobileLayout({
             </button>
           </div>
 
-          <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
-            <p className="text-xs italic text-zinc-500 dark:text-zinc-400 leading-snug line-clamp-3">
+          {/* Excerpt preview */}
+          <div
+            className="px-4 py-3 shrink-0"
+            style={{ borderBottom: "1px solid var(--border-subtle)" }}
+          >
+            <p
+              className="text-[0.8125rem] italic leading-snug line-clamp-3"
+              style={{ color: "var(--ink-2)", fontFamily: "var(--font-serif)" }}
+            >
               &ldquo;{doc.text.slice(sheetHighlight.canonicalStart, sheetHighlight.canonicalEnd)}&rdquo;
             </p>
           </div>
 
+          {/* Analysis content */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {sheetAnalysis ? (
               <AnnotationCard
@@ -610,8 +620,11 @@ function MobileLayout({
                 onAskFollowUp={(q) => onAskFollowUp(sheetHighlight.id, q)}
               />
             ) : (
-              <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
-                <span className="inline-block w-3 h-3 border-2 border-zinc-300 border-t-zinc-500 rounded-full animate-spin" />
+              <div className="flex items-center gap-2 text-[11px] font-mono" style={{ color: "var(--ink-3)" }}>
+                <span
+                  className="inline-block w-3 h-3 rounded-full border-2 border-t-transparent animate-spin"
+                  style={{ borderColor: "var(--ink-3)", borderTopColor: "transparent" }}
+                />
                 Analyzing…
               </div>
             )}
@@ -642,22 +655,30 @@ function DocumentText({
   onHighlightClick,
 }: DocumentTextProps) {
   return (
-    <div className="font-serif text-[1.0625rem] leading-[1.8] text-zinc-800 dark:text-zinc-200 break-words hyphens-auto selection:bg-blue-100 dark:selection:bg-blue-900">
+    <div
+      className="text-[1.0625rem] leading-[1.8] break-words hyphens-auto"
+      style={{
+        fontFamily: "var(--font-serif)",
+        color: "var(--ink-1)",
+        WebkitHyphens: "auto" as React.CSSProperties["WebkitHyphens"],
+      }}
+    >
       {pagedSegments.map((page, pageIdx) => (
         <div key={pageIdx}>
-          {/* Page break separator — only between pages, not before the first */}
           {pageIdx > 0 && showPageBreaks && (
             <div className="my-10 flex flex-col items-center gap-2" aria-hidden="true">
-              <div className="w-full border-t border-dashed border-zinc-200 dark:border-zinc-700" />
+              <div className="w-full" style={{ borderTop: "1px dashed var(--border-subtle)" }} />
               {page.pageNum && (
-                <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-300 dark:text-zinc-600 select-none">
+                <span
+                  className="text-[9px] font-mono uppercase tracking-widest select-none"
+                  style={{ color: "var(--ink-3)" }}
+                >
                   Page {page.pageNum}
                 </span>
               )}
             </div>
           )}
 
-          {/* Each page's text — whitespace-pre-wrap preserves \n\n paragraph gaps */}
           <div className="whitespace-pre-wrap">
             {page.segments.map((seg, i) => {
               if (!seg.highlightId) {
@@ -676,13 +697,11 @@ function DocumentText({
                   }}
                   onClick={() => onHighlightClick(id)}
                   title={hasAnalysis ? "Click to see analysis" : undefined}
-                  className={[
-                    "cursor-pointer rounded-sm transition-colors",
-                    isActive
-                      ? "bg-amber-400 dark:bg-amber-500"
-                      : "bg-amber-200 dark:bg-amber-800/60 hover:bg-amber-300 dark:hover:bg-amber-700/70",
-                  ].join(" ")}
-                  style={{ WebkitTextFillColor: "inherit" }}
+                  className="cursor-pointer rounded-sm transition-colors"
+                  style={{
+                    backgroundColor: isActive ? "var(--hl-active)" : "var(--hl-soft)",
+                    WebkitTextFillColor: "inherit",
+                  }}
                 >
                   {seg.text}
                 </mark>
@@ -708,7 +727,7 @@ interface AnnotationCardProps {
   onAskFollowUp: (question: string) => void
 }
 
-const MAX_EXCERPT_CHARS = 120
+const MAX_EXCERPT_CHARS = 100
 const MAX_FOLLOW_UP_CHARS = 500
 
 function AnnotationCard({
@@ -724,8 +743,6 @@ function AnnotationCard({
   const [followUpText, setFollowUpText] = useState("")
   const [showFollowUp, setShowFollowUp] = useState(false)
 
-  // Clear the input only when a successful response arrives (loading → idle).
-  // On error the text stays so the user can retry without retyping.
   const prevFollowUpStatus = useRef(analysis.followUpStatus)
   useEffect(() => {
     const prev = prevFollowUpStatus.current
@@ -747,147 +764,176 @@ function AnnotationCard({
     const q = followUpText.trim()
     if (!q || q.length > MAX_FOLLOW_UP_CHARS) return
     onAskFollowUp(q)
-    // Do NOT clear followUpText here — it stays until a response arrives
-    // so the question isn't lost if the Gemini call fails.
   }
-
-  const borderColor = isActive
-    ? "border-amber-500 dark:border-amber-400"
-    : "border-zinc-200 dark:border-zinc-700"
 
   return (
     <div
       onClick={onClick}
-      className={[
-        "rounded-xl border bg-white dark:bg-zinc-900 shadow-sm cursor-pointer transition-all",
-        borderColor,
-        isActive ? "ring-1 ring-amber-400 dark:ring-amber-500" : "",
-      ].join(" ")}
+      className="cursor-pointer transition-opacity"
+      style={{
+        opacity: isActive ? 1 : 0.75,
+        paddingLeft: "10px",
+        borderLeft: isActive
+          ? `2px solid var(--hl)`
+          : `2px solid var(--border)`,
+      }}
     >
       {!hideExcerpt && (
-        <div className="px-4 pt-3 pb-2 border-b border-zinc-100 dark:border-zinc-800">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 italic leading-snug line-clamp-2">
-            &ldquo;{displayExcerpt}&rdquo;
-          </p>
+        <p
+          className="text-[11px] italic leading-snug mb-2 line-clamp-2"
+          style={{
+            color: "var(--ink-3)",
+            fontFamily: "var(--font-serif)",
+          }}
+        >
+          &ldquo;{displayExcerpt}&rdquo;
+        </p>
+      )}
+
+      {analysis.status === "pending" && (
+        <div className="flex items-center gap-1.5 text-[11px] font-mono" style={{ color: "var(--ink-3)" }}>
+          <span
+            className="inline-block w-2.5 h-2.5 rounded-full border-[1.5px] border-t-transparent animate-spin"
+            style={{ borderColor: "var(--ink-3)", borderTopColor: "transparent" }}
+          />
+          Analyzing…
         </div>
       )}
 
-      <div className="px-4 py-3 space-y-3">
-        {analysis.status === "pending" && (
-          <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
-            <span className="inline-block w-3 h-3 border-2 border-zinc-300 border-t-zinc-500 rounded-full animate-spin" />
-            Analyzing…
-          </div>
-        )}
+      {analysis.status === "error" && (
+        <div className="text-[11px] space-y-1">
+          <p style={{ color: "var(--danger)" }}>Analysis unavailable.</p>
+          <button
+            onClick={(e) => { e.stopPropagation(); onRetry() }}
+            className="text-accent hover:underline font-mono"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-        {analysis.status === "error" && (
-          <div className="text-xs text-red-500 dark:text-red-400 space-y-1">
-            <p>Analysis temporarily unavailable.</p>
-            <button
-              onClick={(e) => { e.stopPropagation(); onRetry() }}
-              className="text-blue-600 dark:text-blue-400 hover:underline"
+      {analysis.status === "complete" && (
+        <div className="space-y-3">
+          {/* Explanation */}
+          <div onClick={(e) => e.stopPropagation()}>
+            <p
+              className="text-[0.8125rem] leading-snug text-ink-1"
             >
-              Retry
-            </button>
+              {analysis.explanation}
+            </p>
           </div>
-        )}
 
-        {analysis.status === "complete" && (
-          <>
+          {/* Key points */}
+          {analysis.keyPoints.length > 0 && (
             <div onClick={(e) => e.stopPropagation()}>
-              <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-                Why this matters
+              <p className="text-[10px] font-mono uppercase tracking-wider mb-1.5" style={{ color: "var(--ink-3)" }}>
+                Key ideas
               </p>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-snug">
-                {analysis.explanation}
-              </p>
+              <ul className="space-y-1">
+                {analysis.keyPoints.map((pt, i) => (
+                  <li key={i} className="flex gap-2 text-[0.8125rem] text-ink-2 leading-snug">
+                    <span style={{ color: "var(--hl)" }} className="shrink-0">·</span>
+                    <span>{pt}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
+          )}
 
-            {analysis.keyPoints.length > 0 && (
-              <div onClick={(e) => e.stopPropagation()}>
-                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-                  Key points
+          {/* Relation to reading */}
+          <div onClick={(e) => e.stopPropagation()}>
+            <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: "var(--ink-3)" }}>
+              In this reading
+            </p>
+            <p className="text-[0.8125rem] text-ink-2 leading-snug">
+              {analysis.relationToReading}
+            </p>
+          </div>
+
+          {/* Follow-up */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="pt-2"
+            style={{ borderTop: "1px solid var(--border-subtle)" }}
+          >
+            {analysis.followUpAnswer && (
+              <div
+                className="mb-3 px-3 py-2 rounded-md"
+                style={{ background: "var(--accent-soft)" }}
+              >
+                <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: "var(--accent)" }}>
+                  Answer
                 </p>
-                <ul className="space-y-0.5">
-                  {analysis.keyPoints.map((pt, i) => (
-                    <li key={i} className="flex gap-1.5 text-sm text-zinc-700 dark:text-zinc-300 leading-snug">
-                      <span className="text-amber-500 shrink-0 mt-0.5">•</span>
-                      <span>{pt}</span>
-                    </li>
-                  ))}
-                </ul>
+                <p className="text-[0.8125rem] text-ink-1 leading-snug">
+                  {analysis.followUpAnswer}
+                </p>
               </div>
             )}
 
-            <div onClick={(e) => e.stopPropagation()}>
-              <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-                In this reading
+            {analysis.followUpStatus === "error" && (
+              <p className="text-[11px] mb-2" style={{ color: "var(--danger)" }}>
+                Follow-up failed. Try again.
               </p>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-snug">
-                {analysis.relationToReading}
-              </p>
-            </div>
+            )}
 
-            <div onClick={(e) => e.stopPropagation()} className="pt-1 border-t border-zinc-100 dark:border-zinc-800">
-              {analysis.followUpAnswer && (
-                <div className="mb-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 px-3 py-2">
-                  <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-0.5">Answer</p>
-                  <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-snug">
-                    {analysis.followUpAnswer}
-                  </p>
-                </div>
-              )}
-
-              {analysis.followUpStatus === "error" && (
-                <p className="text-xs text-red-500 dark:text-red-400 mb-2">
-                  Follow-up failed. Try again.
-                </p>
-              )}
-
-              {!showFollowUp ? (
-                <button
-                  onClick={() => setShowFollowUp(true)}
-                  className="text-xs text-zinc-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                >
-                  Ask about this highlight…
-                </button>
-              ) : (
-                <form onSubmit={handleSubmitFollowUp} className="space-y-1.5">
-                  <textarea
-                    value={followUpText}
-                    onChange={(e) => setFollowUpText(e.target.value)}
-                    placeholder="Ask a follow-up question…"
-                    rows={2}
-                    maxLength={MAX_FOLLOW_UP_CHARS}
-                    className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-500 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <div className="flex items-center justify-between">
-                    <span className={`text-xs ${followUpText.length > MAX_FOLLOW_UP_CHARS - 50 ? "text-amber-500" : "text-zinc-400"}`}>
-                      {followUpText.length}/{MAX_FOLLOW_UP_CHARS}
-                    </span>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => { setShowFollowUp(false); setFollowUpText("") }}
-                        className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={!followUpText.trim() || followUpText.length > MAX_FOLLOW_UP_CHARS || analysis.followUpStatus === "loading"}
-                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-xs font-medium transition-colors"
-                      >
-                        {analysis.followUpStatus === "loading" ? "…" : "Ask"}
-                      </button>
-                    </div>
+            {!showFollowUp ? (
+              <button
+                onClick={() => setShowFollowUp(true)}
+                className="text-[11px] font-mono transition-colors hover:text-accent"
+                style={{ color: "var(--ink-3)" }}
+              >
+                Ask about this passage…
+              </button>
+            ) : (
+              <form onSubmit={handleSubmitFollowUp} className="space-y-2">
+                <textarea
+                  value={followUpText}
+                  onChange={(e) => setFollowUpText(e.target.value)}
+                  placeholder="Ask a follow-up question…"
+                  rows={2}
+                  maxLength={MAX_FOLLOW_UP_CHARS}
+                  className="w-full rounded px-2.5 py-1.5 text-[0.8125rem] placeholder:text-ink-3 resize-none focus:outline-none"
+                  style={{
+                    background: "var(--surface-inset)",
+                    border: "1px solid var(--border)",
+                    color: "var(--ink-1)",
+                  }}
+                />
+                <div className="flex items-center justify-between">
+                  <span
+                    className="text-[11px] font-mono"
+                    style={{
+                      color: followUpText.length > MAX_FOLLOW_UP_CHARS - 50
+                        ? "var(--warning)"
+                        : "var(--ink-3)",
+                    }}
+                  >
+                    {followUpText.length}/{MAX_FOLLOW_UP_CHARS}
+                  </span>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => { setShowFollowUp(false); setFollowUpText("") }}
+                      className="text-[11px] font-mono transition-colors hover:text-ink-1"
+                      style={{ color: "var(--ink-3)" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!followUpText.trim() || followUpText.length > MAX_FOLLOW_UP_CHARS || analysis.followUpStatus === "loading"}
+                      className="text-[11px] font-mono px-2.5 py-1 rounded transition-opacity disabled:opacity-40 text-accent-ink"
+                      style={{ background: "var(--accent)" }}
+                    >
+                      {analysis.followUpStatus === "loading" ? "…" : "Ask"}
+                    </button>
                   </div>
-                </form>
-              )}
-            </div>
-          </>
-        )}
-      </div>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

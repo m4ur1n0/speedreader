@@ -8,9 +8,9 @@ import { HighlightDigest } from "./components/HighlightDigest";
 import { HighlightAnalysisView } from "./components/HighlightAnalysisView";
 import { useHighlightAnalysis } from "./lib/highlightAnalysis/useHighlightAnalysis";
 import type { ParsedDocument } from "./lib/document";
-import { getSourceSpansForRange } from "./lib/document";
 import { buildReaderModel } from "./lib/reader/tokenizer";
 import type { ReaderHighlight } from "./lib/highlight/types";
+import type { ReadingMode } from "./components/reader/ReaderControls";
 import {
   estimateNormalReadingSeconds,
   estimateSpeedreaderSeconds,
@@ -26,16 +26,15 @@ export default function Home() {
   const [analysisActive, setAnalysisActive] = useState(false);
   const [session, setSession] = useState<ReaderSession | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [readerMode, setReaderMode] = useState<ReadingMode>("baseline");
 
   const readerModel = useMemo(
     () => (doc ? buildReaderModel(doc) : null),
     [doc]
   );
 
-  // Stable empty arrays so useHighlightAnalysis hook doesn't throw when doc/session are null
   const currentHighlights: ReaderHighlight[] = session?.highlights ?? [];
 
-  // Analysis state lives at page level so it survives navigation between views
   const analysisControls = useHighlightAnalysis(
     currentHighlights,
     doc ?? { text: "", spans: [], metadata: { fileName: "", fileType: "" } }
@@ -55,7 +54,6 @@ export default function Home() {
     setReaderActive(false);
   }
 
-  // Core export — does not catch; callers are responsible for their own error UI.
   async function handleDownloadPdf(highlights: ReaderHighlight[]) {
     if (!doc || !sourceFile || highlights.length === 0) return;
     if (doc.metadata.fileType === "pdf") {
@@ -68,7 +66,6 @@ export default function Home() {
     }
   }
 
-  // Home-page button wrapper: catches and stores error for display on this page.
   function handleHomePageDownload() {
     if (!session) return;
     setExportError(null);
@@ -86,12 +83,15 @@ export default function Home() {
     setReaderActive(true);
   }
 
+  // ── Full-screen takeovers ──────────────────────────────────────────────────
+
   if (readerActive && readerModel) {
     return (
       <ReaderView
         model={readerModel}
         onExit={handleReaderExit}
         initialSession={session}
+        initialMode={readerMode}
         onDownloadPdf={doc ? handleDownloadPdf : null}
       />
     );
@@ -108,231 +108,296 @@ export default function Home() {
     );
   }
 
+  // ── Home page ──────────────────────────────────────────────────────────────
+
+  const progressPct = readerModel && hasProgress
+    ? Math.round((session!.currentTokenId / readerModel.tokens.length) * 100)
+    : 0;
+
   return (
-    <main className="flex flex-1 flex-col items-center p-8 gap-8">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        Turbo Speedreader
-      </h1>
+    <div className="flex flex-col min-h-screen" style={{ background: "var(--bg)" }}>
+      {/* ── Minimal header ─────────────────────────────────────────────────── */}
+      <header
+        className="shrink-0 h-11 flex items-center gap-3 px-5 sm:px-6"
+        style={{ borderBottom: "1px solid var(--border-subtle)" }}
+      >
+        <span
+          className="text-[10px] font-mono tracking-[0.22em] uppercase select-none"
+          style={{ color: "var(--ink-3)" }}
+        >
+          turbo
+        </span>
 
-      <FileUpload onDocumentParsed={handleDocumentParsed} />
+        {doc && (
+          <>
+            <span className="w-px h-3" style={{ background: "var(--border)" }} aria-hidden="true" />
+            <span className="text-sm text-ink-2 truncate max-w-[18rem] sm:max-w-sm">
+              {doc.metadata.fileName}
+            </span>
+            <span className="ml-auto">
+              <button
+                onClick={() => handleDocumentParsed(null, null)}
+                className="text-[11px] font-mono transition-colors hover:text-ink-2"
+                style={{ color: "var(--ink-3)" }}
+              >
+                change
+              </button>
+            </span>
+          </>
+        )}
+      </header>
 
-      {/* ── Pre-reading stats + action buttons ──────────────────────────────── */}
-      {doc && readerModel && (
-        <div className="flex flex-col items-center gap-4 w-full max-w-sm">
-          {/* Reading time estimates */}
-          <ReadingEstimates tokenCount={readerModel.tokens.length} />
+      {/* ── Main content ───────────────────────────────────────────────────── */}
+      <main className="flex-1 flex flex-col items-center px-5 sm:px-6 py-10 sm:py-14">
 
-          {/* Start / Resume / Restart buttons */}
-          <div className="flex items-center gap-3">
-            {hasProgress ? (
-              <>
+        {/* Upload state — no document */}
+        {!doc && (
+          <div className="w-full max-w-md flex flex-col gap-8 mt-4 sm:mt-8">
+            <div className="text-center">
+              <h1 className="text-2xl font-semibold tracking-tight text-ink-1">
+                Bring in something to read.
+              </h1>
+              <p className="mt-1.5 text-sm text-ink-3">
+                Drop a document to get started.
+              </p>
+            </div>
+
+            <FileUpload onDocumentParsed={handleDocumentParsed} />
+
+            <p className="text-center text-[11px] font-mono text-ink-3">
+              PDF · TXT · EPUB · Markdown · RTF
+            </p>
+          </div>
+        )}
+
+        {/* Document-ready state */}
+        {doc && readerModel && (
+          <div className="w-full max-w-lg flex flex-col gap-7">
+
+            {/* Document summary */}
+            <DocumentSummary
+              doc={doc}
+              tokenCount={readerModel.tokens.length}
+            />
+
+            {/* Mode selector */}
+            <ModeSelector mode={readerMode} onChange={setReaderMode} />
+
+            {/* Primary CTA */}
+            <div className="flex flex-col gap-2">
+              {hasProgress ? (
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => setReaderActive(true)}
+                    className="flex-1 h-11 rounded-lg text-sm font-medium tracking-tight transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2"
+                    style={{
+                      background: "var(--accent)",
+                      color: "var(--accent-ink)",
+                      outlineColor: "var(--accent)",
+                    }}
+                  >
+                    Resume — {progressPct}% complete
+                  </button>
+                  <button
+                    onClick={() => { setSession(null); setReaderActive(true); }}
+                    className="h-11 px-4 rounded-lg text-sm text-ink-2 transition-colors hover:text-ink-1"
+                    style={{
+                      border: "1px solid var(--border)",
+                      background: "transparent",
+                    }}
+                  >
+                    Restart
+                  </button>
+                </div>
+              ) : (
                 <button
                   onClick={() => setReaderActive(true)}
-                  className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-500"
-                >
-                  Resume — {session!.currentTokenId.toLocaleString()} /{" "}
-                  {readerModel.tokens.length.toLocaleString()} words
-                </button>
-                <button
-                  onClick={() => {
-                    setSession(null);
-                    setReaderActive(true);
+                  className="w-full h-11 rounded-lg text-sm font-medium tracking-tight transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-2"
+                  style={{
+                    background: "var(--accent)",
+                    color: "var(--accent-ink)",
+                    outlineColor: "var(--accent)",
                   }}
-                  className="px-4 py-3 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-medium transition-colors"
                 >
-                  Restart
+                  Start reading
+                  <span className="ml-2 opacity-60 font-mono text-xs">
+                    {readerModel.tokens.length.toLocaleString()} words
+                  </span>
                 </button>
-              </>
-            ) : (
-              <button
-                onClick={() => setReaderActive(true)}
-                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-500"
-              >
-                Start Reading — {readerModel.tokens.length.toLocaleString()} words
-              </button>
+              )}
+            </div>
+
+            {/* Post-reading actions */}
+            {hasHighlights && (
+              <div className="space-y-4">
+                <div
+                  className="flex items-center justify-between text-sm pt-2"
+                  style={{ borderTop: "1px solid var(--border-subtle)" }}
+                >
+                  <span className="font-mono text-[11px] text-ink-3">
+                    {session!.highlights.length}{" "}
+                    {session!.highlights.length === 1 ? "highlight" : "highlights"}
+                  </span>
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => setAnalysisActive(true)}
+                      className="text-sm font-medium transition-colors hover:opacity-80"
+                      style={{ color: "var(--accent)" }}
+                    >
+                      Analyze highlights →
+                    </button>
+                    <button
+                      onClick={handleHomePageDownload}
+                      className="text-sm transition-colors hover:text-ink-1"
+                      style={{ color: "var(--ink-2)" }}
+                    >
+                      Export PDF
+                    </button>
+                  </div>
+                </div>
+
+                {exportError && (
+                  <p className="text-xs" style={{ color: "var(--danger)" }} role="alert">
+                    {exportError}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Highlight digest */}
+            {hasHighlights && (
+              <HighlightDigest
+                highlights={session!.highlights}
+                canonicalText={doc.text}
+                onSeekTo={handleResumeSeek}
+              />
             )}
           </div>
-
-          {/* Post-reading actions */}
-          {hasHighlights && (
-            <div className="flex flex-col gap-2 w-full">
-              {/* Analyze Highlights */}
-              <button
-                onClick={() => setAnalysisActive(true)}
-                className="w-full px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
-              >
-                Analyze Highlights ({session!.highlights.length}{" "}
-                {session!.highlights.length === 1 ? "highlight" : "highlights"})
-              </button>
-
-              {/* Download highlighted PDF */}
-              <button
-                onClick={handleHomePageDownload}
-                className="w-full px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors"
-              >
-                Download Highlighted PDF
-              </button>
-            </div>
-          )}
-
-          {exportError && (
-            <p className="text-sm text-red-500 max-w-sm text-center" role="alert">
-              {exportError}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* ── Highlight digest ─────────────────────────────────────────────────── */}
-      {doc && hasHighlights && (
-        <HighlightDigest
-          highlights={session!.highlights}
-          canonicalText={doc.text}
-          onSeekTo={handleResumeSeek}
-        />
-      )}
-
-      {/* ── Debug panel ──────────────────────────────────────────────────────── */}
-      {doc && <DebugPanel doc={doc} />}
-    </main>
+        )}
+      </main>
+    </div>
   );
 }
 
-// ─── Pre-reading estimates ───────────────────────────────────────────────────
+// ── Document summary ─────────────────────────────────────────────────────────
 
-function ReadingEstimates({ tokenCount }: { tokenCount: number }) {
+function DocumentSummary({
+  doc,
+  tokenCount,
+}: {
+  doc: ParsedDocument;
+  tokenCount: number;
+}) {
   const normalSec = estimateNormalReadingSeconds(tokenCount);
   const speedSec = estimateSpeedreaderSeconds(tokenCount, RAMP_MAX_WPM);
   const savedSec = Math.max(0, normalSec - speedSec);
 
   return (
-    <div className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-5 py-4 text-sm">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 tabular-nums">
-        <span className="text-zinc-500 dark:text-zinc-400">Words</span>
-        <span className="font-medium text-zinc-800 dark:text-zinc-200">
-          {tokenCount.toLocaleString()}
-        </span>
-
-        <span className="text-zinc-500 dark:text-zinc-400">
-          Normal ({NORMAL_READING_WPM} WPM)
-        </span>
-        <span className="font-medium text-zinc-800 dark:text-zinc-200">
-          {formatDuration(normalSec)}
-        </span>
-
-        <span className="text-zinc-500 dark:text-zinc-400">
-          Speedreader est.
-        </span>
-        <span className="font-medium text-blue-600 dark:text-blue-400">
-          {formatDuration(speedSec)}
-        </span>
-
-        {savedSec > 60 && (
-          <>
-            <span className="text-zinc-500 dark:text-zinc-400">Est. time saved</span>
-            <span className="font-medium text-green-600 dark:text-green-400">
-              {formatDuration(savedSec)}
-            </span>
-          </>
-        )}
+    <div className="space-y-4">
+      {/* Filename + file type */}
+      <div>
+        <p
+          className="text-[11px] font-mono uppercase tracking-widest mb-1"
+          style={{ color: "var(--ink-3)" }}
+        >
+          {doc.metadata.fileType}
+        </p>
+        <h2 className="text-lg font-semibold tracking-tight text-ink-1 leading-snug">
+          {doc.metadata.fileName}
+        </h2>
       </div>
-      <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
-        Estimates only. Speedreader time uses the {RAMP_MAX_WPM}-WPM ramp.
-      </p>
-    </div>
-  );
-}
 
-// ─── Debug panel ─────────────────────────────────────────────────────────────
-
-function DebugPanel({ doc }: { doc: ParsedDocument }) {
-  const PREVIEW_CHARS = 500;
-  const SPAN_ROWS = 12;
-
-  const exampleSpans = getSourceSpansForRange(doc, 0, 100);
-
-  return (
-    <div className="w-full max-w-3xl space-y-6 text-sm font-mono">
-      <section>
-        <h2 className="mb-2 font-sans font-semibold text-zinc-700 dark:text-zinc-300">
-          Metadata
-        </h2>
-        <pre className="rounded-lg bg-zinc-100 dark:bg-zinc-900 p-4 overflow-x-auto text-xs">
-          {JSON.stringify(doc.metadata, null, 2)}
-        </pre>
-      </section>
-
-      <section>
-        <h2 className="mb-2 font-sans font-semibold text-zinc-700 dark:text-zinc-300">
-          Canonical text — first {PREVIEW_CHARS} chars
-          <span className="ml-2 font-normal text-zinc-500">
-            ({doc.text.length.toLocaleString()} total · {doc.spans.length.toLocaleString()} spans)
-          </span>
-        </h2>
-        <pre className="rounded-lg bg-zinc-100 dark:bg-zinc-900 p-4 overflow-x-auto text-xs whitespace-pre-wrap">
-          {doc.text.slice(0, PREVIEW_CHARS)}
-          {doc.text.length > PREVIEW_CHARS && "\n…"}
-        </pre>
-      </section>
-
-      <section>
-        <h2 className="mb-2 font-sans font-semibold text-zinc-700 dark:text-zinc-300">
-          First {SPAN_ROWS} spans
-        </h2>
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <table className="w-full text-xs">
-            <thead className="bg-zinc-100 dark:bg-zinc-800 text-left">
-              <tr>
-                <th className="px-3 py-2">id</th>
-                <th className="px-3 py-2">start</th>
-                <th className="px-3 py-2">end</th>
-                <th className="px-3 py-2">text</th>
-                <th className="px-3 py-2">source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {doc.spans.slice(0, SPAN_ROWS).map((span) => (
-                <tr
-                  key={span.id}
-                  className="border-t border-zinc-200 dark:border-zinc-700"
-                >
-                  <td className="px-3 py-1.5 text-zinc-500">{span.id}</td>
-                  <td className="px-3 py-1.5">{span.start}</td>
-                  <td className="px-3 py-1.5">{span.end}</td>
-                  <td className="px-3 py-1.5 max-w-xs truncate">
-                    {JSON.stringify(span.text)}
-                  </td>
-                  <td className="px-3 py-1.5 text-zinc-500 max-w-xs">
-                    {formatSource(span.source)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Reading stats row */}
+      <div
+        className="grid gap-4 pt-4 text-sm"
+        style={{
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          borderTop: "1px solid var(--border-subtle)",
+        }}
+      >
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: "var(--ink-3)" }}>
+            Words
+          </p>
+          <p className="font-mono tabular-nums text-ink-1 font-medium">
+            {tokenCount.toLocaleString()}
+          </p>
         </div>
-      </section>
-
-      <section>
-        <h2 className="mb-2 font-sans font-semibold text-zinc-700 dark:text-zinc-300">
-          getSourceSpansForRange(doc, 0, 100) → {exampleSpans.length} spans
-        </h2>
-        <pre className="rounded-lg bg-zinc-100 dark:bg-zinc-900 p-4 overflow-x-auto text-xs whitespace-pre-wrap">
-          {exampleSpans
-            .map(
-              (s) =>
-                `[${s.start}–${s.end}] ${formatSource(s.source)}: ${JSON.stringify(s.text)}`
-            )
-            .join("\n")}
-        </pre>
-      </section>
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: "var(--ink-3)" }}>
+            Normal ({NORMAL_READING_WPM} WPM)
+          </p>
+          <p className="font-mono tabular-nums text-ink-2">
+            {formatDuration(normalSec)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-mono uppercase tracking-wider mb-1" style={{ color: "var(--ink-3)" }}>
+            With Turbo
+          </p>
+          <p className="font-mono tabular-nums font-medium" style={{ color: "var(--accent)" }}>
+            {formatDuration(speedSec)}
+          </p>
+          {savedSec > 60 && (
+            <p className="text-[10px] font-mono mt-0.5" style={{ color: "var(--success)" }}>
+              saves ~{formatDuration(savedSec)}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-function formatSource(source: ParsedDocument["spans"][number]["source"]): string {
-  if (source.kind === "pdf") {
-    const b = source.boxes[0];
-    return `pdf p${source.page} x=${b.x.toFixed(1)} y=${b.y.toFixed(1)} w=${b.width.toFixed(1)} h=${b.height.toFixed(1)}`;
-  }
-  return `text [${source.start}–${source.end}]${source.line != null ? ` ln${source.line}` : ""}`;
+// ── Mode selector ─────────────────────────────────────────────────────────────
+
+function ModeSelector({
+  mode,
+  onChange,
+}: {
+  mode: ReadingMode;
+  onChange: (m: ReadingMode) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[11px] font-mono uppercase tracking-wider shrink-0" style={{ color: "var(--ink-3)" }}>
+        Mode
+      </span>
+
+      <div
+        className="flex rounded overflow-hidden text-[11px] font-mono"
+        style={{ border: "1px solid var(--border)" }}
+      >
+        <button
+          onClick={() => onChange("baseline")}
+          className="px-3 py-1.5 transition-colors"
+          style={{
+            background: mode === "baseline" ? "var(--surface-inset)" : "transparent",
+            color: mode === "baseline" ? "var(--ink-1)" : "var(--ink-3)",
+          }}
+          aria-pressed={mode === "baseline"}
+        >
+          Baseline
+        </button>
+        <div className="w-px" style={{ background: "var(--border)" }} aria-hidden="true" />
+        <button
+          onClick={() => onChange("adaptive")}
+          className="px-3 py-1.5 transition-colors"
+          style={{
+            background: mode === "adaptive" ? "var(--surface-inset)" : "transparent",
+            color: mode === "adaptive" ? "var(--ink-1)" : "var(--ink-3)",
+          }}
+          aria-pressed={mode === "adaptive"}
+        >
+          Adaptive
+        </button>
+      </div>
+
+      <span className="text-[11px] text-ink-3 hidden sm:block">
+        {mode === "adaptive"
+          ? "AI adjusts pace for dense passages"
+          : "Consistent pace throughout"}
+      </span>
+    </div>
+  );
 }

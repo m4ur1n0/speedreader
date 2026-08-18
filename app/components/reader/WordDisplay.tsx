@@ -14,11 +14,6 @@ interface Props {
  * word length, achieved by splitting the word into three parts (before /
  * focus / after) and placing them in two flex columns that meet at the
  * horizontal center of the container.
- *
- * The focal character is highlighted with the semantic accent colour.
- * Bold weight provides a non-colour fallback for accessibility.
- *
- * Line/paragraph start markers appear above the word as a secondary cue.
  */
 export function WordDisplay({ token, paused }: Props) {
   if (!token) return null
@@ -33,12 +28,12 @@ export function WordDisplay({ token, paused }: Props) {
   const showLineMarker = isLineStart && !isParagraphStart
 
   return (
-    <div className="flex flex-col items-center gap-2 select-none">
+    <div className="flex flex-col items-center select-none" style={{ gap: "0.75rem" }}>
       {/* Section-boundary indicator */}
-      <div className="h-5 flex items-center justify-center">
+      <div className="h-4 flex items-center justify-center">
         {showParaMarker && (
           <span
-            className="text-xs tracking-widest text-zinc-400 dark:text-zinc-500"
+            className="text-[10px] font-mono tracking-widest text-ink-3"
             aria-hidden="true"
           >
             ¶
@@ -46,7 +41,7 @@ export function WordDisplay({ token, paused }: Props) {
         )}
         {showLineMarker && (
           <span
-            className="text-xs tracking-widest text-zinc-400 dark:text-zinc-500"
+            className="text-[10px] font-mono tracking-widest text-ink-3"
             aria-hidden="true"
           >
             ↩
@@ -56,41 +51,44 @@ export function WordDisplay({ token, paused }: Props) {
 
       {/* Focal word row */}
       <div
-        className={`flex items-baseline w-full max-w-xl transition-opacity duration-75 ${
-          paused ? "opacity-40" : "opacity-100"
+        className={`flex items-baseline w-full max-w-xl transition-opacity duration-100 ${
+          paused ? "opacity-35" : "opacity-100"
         }`}
         aria-label={text}
         role="text"
       >
-        {/*
-         * Left column — right-aligned.
-         * flex-1 gives it half the container; text-right pushes content
-         * to the right edge, which is the center of the container.
-         */}
+        {/* Left column — right-aligned to center pivot */}
         <div className="flex-1 text-right overflow-visible leading-none" aria-hidden="true">
-          <span className="text-5xl font-sans text-foreground tracking-tight">
+          <span className="text-5xl font-sans text-ink-1 tracking-tight">
             {before}
           </span>
         </div>
 
-        {/* Focal character — the pivot. Always at container midpoint. */}
+        {/* Focal character — accent blue, the fixation pivot */}
         <span
-          className="shrink-0 text-5xl font-sans font-bold leading-none tracking-tight text-red-600 dark:text-red-400"
+          className="shrink-0 text-5xl font-sans font-semibold leading-none tracking-tight text-accent"
           aria-hidden="true"
         >
           {focus || " "}
         </span>
 
-        {/* Right column — left-aligned. */}
+        {/* Right column — left-aligned */}
         <div className="flex-1 overflow-visible leading-none" aria-hidden="true">
-          <span className="text-5xl font-sans text-foreground tracking-tight">
+          <span className="text-5xl font-sans text-ink-1 tracking-tight">
             {after}
           </span>
         </div>
       </div>
 
-      {/* Underline guide — thin line at the baseline of the focal char */}
-      <div className="w-2 h-px bg-blue-400 dark:bg-blue-500 mt-0.5" aria-hidden="true" />
+      {/* Fixation marker — subtle –•– guide below the focal column */}
+      <div
+        className={`flex items-center gap-0.5 transition-opacity duration-100 ${paused ? "opacity-20" : "opacity-40"}`}
+        aria-hidden="true"
+      >
+        <div className="w-4 h-px bg-accent" />
+        <div className="w-[3px] h-[3px] rounded-full bg-accent" />
+        <div className="w-4 h-px bg-accent" />
+      </div>
     </div>
   )
 }

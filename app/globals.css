@@ -1,26 +1,142 @@
 @import "tailwindcss";
 
+/* ── Semantic design tokens ─────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* Surfaces — warm paper hierarchy */
+  --bg:              #F3EFE7;
+  --surface:         #FAF7F0;
+  --surface-raised:  #FFFFFF;
+  --surface-inset:   #EAE5DC;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Borders */
+  --border:          #CDC7BC;
+  --border-subtle:   #DDD8CE;
+
+  /* Typography — charcoal ink */
+  --ink-1: #1C1917;
+  --ink-2: #57534E;
+  --ink-3: #A8A29E;
+
+  /* Accent — deep electric blue */
+  --accent:        #1D4ED8;
+  --accent-hover:  #1E40AF;
+  --accent-soft:   #EFF6FF;
+  --accent-border: #BFDBFE;
+  --accent-ink:    #FFFFFF;
+
+  /* Highlight — warm amber (reading marks) */
+  --hl:        #D97706;
+  --hl-soft:   rgba(251, 191, 36, 0.18);
+  --hl-active: rgba(245, 158, 11, 0.50);
+  --hl-border: #FDE68A;
+
+  /* Status */
+  --success: #15803D;
+  --warning: #B45309;
+  --danger:  #B91C1C;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg:              #141210;
+    --surface:         #1A1815;
+    --surface-raised:  #222019;
+    --surface-inset:   #0F0D0B;
+
+    --border:          #2C2920;
+    --border-subtle:   #221F18;
+
+    --ink-1: #EDE8DF;
+    --ink-2: #9E9690;
+    --ink-3: #65605A;
+
+    --accent:        #3B82F6;
+    --accent-hover:  #60A5FA;
+    --accent-soft:   #172554;
+    --accent-border: #1E3A8A;
+    --accent-ink:    #FFFFFF;
+
+    --hl:        #F59E0B;
+    --hl-soft:   rgba(217, 119, 6, 0.22);
+    --hl-active: rgba(245, 158, 11, 0.45);
+    --hl-border: #5C3A04;
+
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --danger:  #EF4444;
   }
 }
 
+/* ── Tailwind v4: generate utility classes from tokens ─────────────────── */
+@theme inline {
+  /* Legacy compat */
+  --color-background: var(--bg);
+  --color-foreground: var(--ink-1);
+
+  /* Surfaces */
+  --color-bg:             var(--bg);
+  --color-surface:        var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-inset:  var(--surface-inset);
+
+  /* Borders */
+  --color-border:        var(--border);
+  --color-border-subtle: var(--border-subtle);
+
+  /* Ink */
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+
+  /* Accent */
+  --color-accent:        var(--accent);
+  --color-accent-hover:  var(--accent-hover);
+  --color-accent-soft:   var(--accent-soft);
+  --color-accent-border: var(--accent-border);
+  --color-accent-ink:    var(--accent-ink);
+
+  /* Highlight */
+  --color-hl:        var(--hl);
+  --color-hl-border: var(--hl-border);
+
+  /* Status */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger:  var(--danger);
+
+  /* Font stacks */
+  --font-sans:  var(--font-geist-sans), 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:  var(--font-geist-mono), 'Cascadia Code', 'Courier New', monospace;
+  --font-serif: Georgia, 'Times New Roman', serif;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Slim scrollbars ────────────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
+
+/* ── Focus ring ─────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

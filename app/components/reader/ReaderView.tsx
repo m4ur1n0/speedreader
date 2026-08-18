@@ -20,6 +20,7 @@ interface Props {
   model: ReaderModel
   onExit: (session: ReaderSession) => void
   initialSession?: ReaderSession | null
+  initialMode?: ReadingMode
   onDownloadPdf?: ((highlights: ReaderHighlight[]) => Promise<void>) | null
 }
 
@@ -36,8 +37,8 @@ const AUTOMATIC_MAX_WPM = 350
 const MANUAL_MAX_WPM_CAP = 500
 const BOOST_INCREMENT = 25
 
-export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Props) {
-  const [mode, setMode] = useState<ReadingMode>("baseline")
+export function ReaderView({ model, onExit, initialSession, initialMode, onDownloadPdf }: Props) {
+  const [mode, setMode] = useState<ReadingMode>(initialMode ?? "baseline")
   const [exportError, setExportError] = useState<string | null>(null)
   const [manualSpeedBoost, setManualSpeedBoost] = useState(0)
   const manualSpeedBoostRef = useRef(0)
@@ -67,7 +68,6 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
 
-  // mode ref for keyboard handler
   const modeRef = useRef(mode)
   modeRef.current = mode
 
@@ -84,7 +84,6 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
   const handleSpeedUpRef = useRef(handleSpeedUp)
   handleSpeedUpRef.current = handleSpeedUp
 
-  // Restore session on mount.
   useEffect(() => {
     if (!initialSession) return
     if (initialSession.currentTokenId > 0) {
@@ -136,7 +135,6 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
     return { currentTokenId, highlights: finalHighlights }
   }, [model])
 
-  // ── Keyboard dispatch ────────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -177,8 +175,6 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
       }
     }
 
-    // If the window loses focus while H is held, keyup will never fire.
-    // Flush the active highlight so the app doesn't stay stuck in highlight mode.
     function handleWindowBlur() {
       highlighterRef.current.flushHighlight()
     }
@@ -216,32 +212,41 @@ export function ReaderView({ model, onExit, initialSession, onDownloadPdf }: Pro
     <div
       ref={containerRef}
       tabIndex={-1}
-      className="flex flex-col min-h-screen bg-background outline-none"
+      className="flex flex-col min-h-screen outline-none"
+      style={{ background: "var(--bg)" }}
       role="application"
       aria-label="Speedreader"
     >
-      <main className="flex-1 flex flex-col items-center justify-center gap-8 px-4 py-10">
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
         <WordDisplay token={token} paused={isPaused} />
 
-        <SentenceContext
-          model={model}
-          currentTokenId={state.currentTokenId}
-          paused={isPaused}
-          highlights={highlighter.highlights}
-          activeHighlight={highlighter.activeHighlight}
-        />
+        <div className="mt-8 w-full">
+          <SentenceContext
+            model={model}
+            currentTokenId={state.currentTokenId}
+            paused={isPaused}
+            highlights={highlighter.highlights}
+            activeHighlight={highlighter.activeHighlight}
+          />
+        </div>
       </main>
 
       {exportError && (
         <div
           role="alert"
-          className="mx-4 mb-2 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-xs text-red-700 dark:text-red-300 flex items-start gap-3"
+          className="mx-4 mb-2 rounded-lg px-4 py-3 text-xs flex items-start gap-3"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--danger)",
+            color: "var(--danger)",
+          }}
         >
           <span className="flex-1">{exportError}</span>
           <button
             onClick={() => setExportError(null)}
             aria-label="Dismiss"
-            className="shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-200"
+            style={{ color: "var(--danger)", opacity: 0.7 }}
+            className="shrink-0 hover:opacity-100 transition-opacity"
           >
             ×
           </button>
